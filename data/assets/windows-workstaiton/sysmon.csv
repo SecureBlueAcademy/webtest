@@ -1,0 +1,17 @@
+timestamp,event_id,user,computer,process_name,process_id,image,command_line,parent_process
+timestamp,event_id,user,computer,process_name,process_id,image,command_line,parent_process
+"2025-11-16 17:08:48",1,"DOMAIN\jdoe",WS-001,explorer.exe,1000,"C:\Windows\explorer.exe",explorer.exe,services.exe
+"2025-11-16 17:38:48",3,SYSTEM,WS-001,svchost.exe,1001,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
+"2025-11-16 18:08:48",5,"WS-001\user1",WS-001,chrome.exe,1002,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
+"2025-11-16 18:38:48",7,"DOMAIN\jdoe",WS-001,powershell.exe,1003,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
+"2025-11-16 19:08:48",10,SYSTEM,WS-001,explorer.exe,1004,"C:\Windows\explorer.exe",explorer.exe,services.exe
+"2025-11-16 19:38:48",11,"WS-001\user1",WS-001,svchost.exe,1005,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
+"2025-11-16 20:08:48",1,"DOMAIN\jdoe",WS-001,chrome.exe,1006,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
+"2025-11-16 20:38:48",3,SYSTEM,WS-001,powershell.exe,1007,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
+"2025-11-16 21:08:48",5,"WS-001\user1",WS-001,explorer.exe,1008,"C:\Windows\explorer.exe",explorer.exe,services.exe
+"2025-11-16 21:38:48",7,"DOMAIN\jdoe",WS-001,svchost.exe,1009,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
+"2025-11-16 22:08:48",10,SYSTEM,WS-001,chrome.exe,1010,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
+"2025-11-16 22:38:48",11,"WS-001\user1",WS-001,powershell.exe,1011,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
+"2025-11-16 23:08:48",1,"DOMAIN\jdoe",WS-001,explorer.exe,1012,"C:\Windows\explorer.exe",explorer.exe,services.exe
+"2025-11-16 23:38:48",3,SYSTEM,WS-001,svchost.exe,1013,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
+"2025-11-17 00:08:48",5,"WS-001\user1",WS-001,chrome.exe,1014,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
