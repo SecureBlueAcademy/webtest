@@ -6,10 +6,16 @@ $alerts = readCSV(ALERTS_CSV);
 
 // Handle alert updates
 if ($_POST['update_alert'] ?? false) {
-    $alertId = $_POST['alert_id'];
-    $field = $_POST['field'];
-    $value = $_POST['value'];
-    
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validateCsrfToken($csrf)) {
+        http_response_code(400);
+        exit('Invalid request token');
+    }
+
+    $alertId = getParam('alert_id', INPUT_POST, '');
+    $field = getParam('field', INPUT_POST, '');
+    $value = getParam('value', INPUT_POST, '');
+
     foreach ($alerts as &$alert) {
         if ($alert[0] === $alertId) {
             if ($field === 'status') $alert[5] = $value;
@@ -222,6 +228,7 @@ if ($_POST['update_alert'] ?? false) {
                                 <td>
                                     <form method="POST" style="display: inline;">
                                         <input type="hidden" name="update_alert" value="1">
+                                        <input type="hidden" name="csrf_token" value="<?php echo escapeHtml(getCsrfToken()); ?>">
                                         <input type="hidden" name="alert_id" value="<?php echo $alert[0]; ?>">
                                         <input type="hidden" name="field" value="status">
                                         <select class="btn" name="value" onchange="this.form.submit()" style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">
@@ -234,6 +241,7 @@ if ($_POST['update_alert'] ?? false) {
                                 <td>
                                     <form method="POST" style="display: inline;">
                                         <input type="hidden" name="update_alert" value="1">
+                                        <input type="hidden" name="csrf_token" value="<?php echo escapeHtml(getCsrfToken()); ?>">
                                         <input type="hidden" name="alert_id" value="<?php echo $alert[0]; ?>">
                                         <input type="hidden" name="field" value="assigned">
                                         <select class="btn" name="value" onchange="this.form.submit()" style="font-size: 0.8rem; padding: 0.25rem 0.5rem;">
@@ -343,4 +351,5 @@ if ($_POST['update_alert'] ?? false) {
         });
     </script>
 </body>
+
 </html>
