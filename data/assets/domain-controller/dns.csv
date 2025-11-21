@@ -1,0 +1,17 @@
+timestamp,client_ip,query_name,query_type,response_code,server,zone
+timestamp,client_ip,query_name,query_type,response_code,server,zone
+"2025-11-16 17:08:48",192.168.1.45,google.com,A,NOERROR,dc-01.corp.local,corp.local
+"2025-11-16 17:18:48",192.168.1.100,malicious-domain.com,AAAA,NXDOMAIN,dc-01.corp.local,.
+"2025-11-16 17:28:48",10.1.1.50,internal-app.corp.local,MX,REFUSED,dc-01.corp.local,corp.local
+"2025-11-16 17:38:48",192.168.1.45,update.microsoft.com,TXT,NOERROR,dc-01.corp.local,.
+"2025-11-16 17:48:48",192.168.1.100,google.com,A,NXDOMAIN,dc-01.corp.local,corp.local
+"2025-11-16 17:58:48",10.1.1.50,malicious-domain.com,AAAA,REFUSED,dc-01.corp.local,.
+"2025-11-16 18:08:48",192.168.1.45,internal-app.corp.local,MX,NOERROR,dc-01.corp.local,corp.local
+"2025-11-16 18:18:48",192.168.1.100,update.microsoft.com,TXT,NXDOMAIN,dc-01.corp.local,.
+"2025-11-16 18:28:48",10.1.1.50,google.com,A,REFUSED,dc-01.corp.local,corp.local
+"2025-11-16 18:38:48",192.168.1.45,malicious-domain.com,AAAA,NOERROR,dc-01.corp.local,.
+"2025-11-16 18:48:48",192.168.1.100,internal-app.corp.local,MX,NXDOMAIN,dc-01.corp.local,corp.local
+"2025-11-16 18:58:48",10.1.1.50,update.microsoft.com,TXT,REFUSED,dc-01.corp.local,.
+"2025-11-16 19:08:48",192.168.1.45,google.com,A,NOERROR,dc-01.corp.local,corp.local
+"2025-11-16 19:18:48",192.168.1.100,malicious-domain.com,AAAA,NXDOMAIN,dc-01.corp.local,.
+"2025-11-16 19:28:48",10.1.1.50,internal-app.corp.local,MX,REFUSED,dc-01.corp.local,corp.local
