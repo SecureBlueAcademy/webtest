@@ -10,28 +10,34 @@ if (isset($_SESSION['user_id'])) {
 $error = '';
 
 if (isset($_POST['login']) && $_POST['login'] == '1') {
-    $username = $_POST['username'] ?? '';
-    $password = $_POST['password'] ?? '';
-    
-    $users = readCSV(USERS_CSV);
-    $login_success = false;
-    
-    foreach ($users as $user) {
-        // Users are stored as indexed arrays: [id, username, password, role]
-        if (isset($user[1]) && $user[1] === $username) {
-            if (password_verify($password, $user[2])) {
-                $_SESSION['user_id'] = $user[0];
-                $_SESSION['username'] = $user[1];
-                $_SESSION['role'] = $user[3];
-                $login_success = true;
-                header('Location: dashboard.php');
-                exit();
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validateCsrfToken($csrf)) {
+        $error = "Security validation failed. Please try again.";
+    } else {
+        $username = getParam('username', INPUT_POST, '');
+        $password = $_POST['password'] ?? '';
+
+        $users = readCSV(USERS_CSV);
+        $login_success = false;
+
+        foreach ($users as $user) {
+            // Users are stored as indexed arrays: [id, username, password, role]
+            if (isset($user[1]) && hash_equals($user[1], $username)) {
+                if (password_verify($password, $user[2])) {
+                    $_SESSION['user_id'] = $user[0];
+                    $_SESSION['username'] = $user[1];
+                    $_SESSION['role'] = $user[3];
+                    session_regenerate_id(true);
+                    $login_success = true;
+                    header('Location: dashboard.php');
+                    exit();
+                }
             }
         }
-    }
-    
-    if (!$login_success) {
-        $error = "Invalid credentials!";
+
+        if (!$login_success) {
+            $error = "Invalid credentials!";
+        }
     }
 }
 ?>
@@ -116,6 +122,7 @@ if (isset($_POST['login']) && $_POST['login'] == '1') {
             
             <form method="POST">
                 <input type="hidden" name="login" value="1">
+                <input type="hidden" name="csrf_token" value="<?php echo escapeHtml(getCsrfToken()); ?>">
                 <div class="form-group">
                     <label for="username">Username</label>
                     <input type="text" id="username" name="username" required value="<?php echo isset($_POST['username']) ? escapeHtml($_POST['username']) : ''; ?>">
@@ -130,4 +137,5 @@ if (isset($_POST['login']) && $_POST['login'] == '1') {
         </div>
     </div>
 </body>
+
 </html>
