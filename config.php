@@ -1,15 +1,26 @@
 <?php
-session_start();
+// Hardened session configuration
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_samesite', 'Lax');
+
+session_start([
+    'cookie_httponly' => true,
+    'cookie_secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
+    'use_strict_mode' => true,
+]);
 
 // Security headers
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
+header("Referrer-Policy: no-referrer");
+header("Content-Security-Policy: default-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net");
 
 // Database configuration for user storage
 define('USERS_CSV', __DIR__ . '/data/users.csv');
-define('ALERTS_CSV', __DIR__ . '/data/alerts.csv');
-define('ASSETS_DIR', __DIR__ . '/data/assets/');
+define('ALERTS_CSV', __DIR__ . '/data/alerts.csv');␊
+define('ASSETS_DIR', __DIR__ . '/data/assets/');␊
 
 // Create data directory if it doesn't exist
 if (!file_exists(__DIR__ . '/data')) {
@@ -22,6 +33,21 @@ function checkAuth() {
         header('Location: index.php');
         exit();
     }
+}
+
+// Input helpers
+function getParam($key, $method = INPUT_GET, $default = '') {
+    $value = filter_input($method, $key, FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    return $value === null ? $default : $value;
+}
+
+function sanitizeArray($values) {
+    if (!is_array($values)) {
+        return [];
+    }
+    return array_map(function($value) {
+        return is_string($value) ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8') : $value;
+    }, $values);
 }
 
 // Secure CSV file operations - UPDATED FOR USER HANDLING
@@ -68,8 +94,8 @@ function readCSV($filename) {
     return $data;
 }
 
-function writeCSV($filename, $data) {
-    if (empty($data)) return false;
+function writeCSV($filename, $data) {␊
+    if (empty($data)) return false;␊
     
     // For users.csv, handle indexed arrays
     if (strpos($filename, 'users.csv') !== false) {
@@ -89,12 +115,16 @@ function writeCSV($filename, $data) {
     if ($file) {
         // Write header from first row keys
         $header = array_keys($data[0]);
+        // Drop accidental inline header rows
+        if ($data && array_values($data[0]) === $header) {
+            array_shift($data);
+        }
         // Remove internal fields from header
         $header = array_filter($header, function($key) {
             return !in_array($key, ['_source_file']);
         });
         fputcsv($file, $header);
-        
+
         foreach ($data as $row) {
             // Remove internal fields before writing
             $write_row = [];
@@ -107,6 +137,18 @@ function writeCSV($filename, $data) {
         return true;
     }
     return false;
+}
+
+// CSRF protection
+function getCsrfToken() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function validateCsrfToken($token) {
+    return !empty($token) && hash_equals($_SESSION['csrf_token'] ?? '', $token);
 }
 
 // Utility functions
@@ -148,29 +190,28 @@ function getAllLogFiles() {
     return $logFiles;
 }
 
-// Read all logs from the new structure
+// Read all logs from the new structure and normalize them for UI/analytics
 function readAllLogs() {
     $allLogs = [];
     $logFiles = getAllLogFiles();
-    
+
     foreach ($logFiles as $fileInfo) {
         $logs = readCSV($fileInfo['path']);
         foreach ($logs as $log) {
-            // Add source information
             $log['asset'] = $fileInfo['asset'];
             $log['log_type'] = $fileInfo['log_type'];
+            $log = enrichLog($log);
             $log['raw_log'] = generateRawLogString($log);
             $allLogs[] = $log;
         }
     }
-    
-    // Sort by timestamp
+
     usort($allLogs, function($a, $b) {
         $timeA = strtotime($a['timestamp'] ?? '');
         $timeB = strtotime($b['timestamp'] ?? '');
         return $timeB - $timeA;
     });
-    
+
     return $allLogs;
 }
 
@@ -183,6 +224,139 @@ function generateRawLogString($log) {
         }
     }
     return rtrim($raw, ' | ');
+}
+
+// Normalize logs to expose consistent SIEM fields
+function enrichLog($log) {
+    $log['event_id'] = $log['event_id'] ?? ($log['signature_id'] ?? ($log['rule_id'] ?? 'N/A'));
+    $log['severity'] = normalizeSeverity($log);
+    $log['event_category'] = normalizeCategory($log);
+    $log['event_summary'] = buildSummary($log);
+    $log['source'] = $log['asset'] . ' / ' . ($log['log_type'] ?? '');
+    $log['normalized_time'] = $log['timestamp'] ?? '';
+    return $log;
+}
+
+function normalizeSeverity($log) {
+    $logType = $log['log_type'] ?? '';
+    $eventId = (string)($log['event_id'] ?? '');
+
+    $severityMaps = [
+        'security' => [
+            '4625' => 'high',
+            '4672' => 'high',
+            '4732' => 'medium',
+            '4648' => 'medium',
+            '4624' => 'low',
+        ],
+        'sysmon' => [
+            '1' => 'medium',
+            '3' => 'medium',
+            '7' => 'high',
+            '10' => 'high',
+            '11' => 'medium',
+        ],
+        'powershell' => [
+            '400' => 'medium',
+            '403' => 'critical',
+            '600' => 'low',
+            '800' => 'medium',
+        ],
+    ];
+
+    if (isset($severityMaps[$logType][$eventId])) {
+        return $severityMaps[$logType][$eventId];
+    }
+
+    if (isset($log['alert_severity'])) {
+        return intval($log['alert_severity']) >= 3 ? 'high' : (intval($log['alert_severity']) >= 2 ? 'medium' : 'low');
+    }
+
+    if (isset($log['action']) && in_array(strtoupper($log['action']), ['DROP', 'REJECT'])) {
+        return 'high';
+    }
+
+    return $log['severity'] ?? 'info';
+}
+
+function normalizeCategory($log) {
+    $logType = $log['log_type'] ?? '';
+    $eventId = (string)($log['event_id'] ?? '');
+
+    $map = [
+        'security' => [
+            '4624' => 'Authentication Success',
+            '4625' => 'Authentication Failure',
+            '4672' => 'Privilege Assignment',
+            '4732' => 'Group Modification',
+            '4648' => 'Explicit Credentials',
+        ],
+        'sysmon' => [
+            '1' => 'Process Creation',
+            '3' => 'Network Connection',
+            '5' => 'Process Termination',
+            '7' => 'Image Loaded',
+            '10' => 'Process Access',
+            '11' => 'File Created',
+        ],
+        'powershell' => [
+            '400' => 'Engine Lifecycle',
+            '403' => 'Blocked Script',
+            '600' => 'Provider Lifecycle',
+            '800' => 'Pipeline Execution',
+        ],
+    ];
+
+    return $map[$logType][$eventId] ?? ucfirst(str_replace('_', ' ', $logType));
+}
+
+function buildSummary($log) {
+    if (!empty($log['message'])) {
+        return $log['message'];
+    }
+
+    if (($log['log_type'] ?? '') === 'security') {
+        return sprintf('User %s %s from %s (Logon type %s)',
+            $log['user'] ?? 'unknown',
+            strtolower($log['result'] ?? 'activity'),
+            $log['source_address'] ?? 'N/A',
+            $log['logon_type'] ?? 'N/A'
+        );
+    }
+
+    if (($log['log_type'] ?? '') === 'sysmon') {
+        return sprintf('%s (%s) executed with PID %s',
+            $log['process_name'] ?? 'process',
+            $log['image'] ?? 'unknown image',
+            $log['process_id'] ?? 'N/A'
+        );
+    }
+
+    if (($log['log_type'] ?? '') === 'firewall') {
+        return sprintf('%s %s:%s -> %s:%s via %s',
+            strtoupper($log['action'] ?? 'action'),
+            $log['src_ip'] ?? '-',
+            $log['src_port'] ?? '-',
+            $log['dest_ip'] ?? '-',
+            $log['dest_port'] ?? '-',
+            $log['protocol'] ?? ''
+        );
+    }
+
+    if (($log['log_type'] ?? '') === 'iis') {
+        return sprintf('%s %s%s returned %s',
+            $log['method'] ?? 'REQ',
+            $log['uri_stem'] ?? '/',
+            !empty($log['uri_query']) ? '?' . $log['uri_query'] : '',
+            $log['status'] ?? ''
+        );
+    }
+
+    if (isset($log['alert_message'])) {
+        return $log['alert_message'];
+    }
+
+    return $log['raw_log'] ?? 'Activity recorded';
 }
 
 // Create the asset directory structure
@@ -572,4 +746,5 @@ function initializeCSVFiles() {
 
 // Initialize files
 initializeCSVFiles();
+
 ?>
