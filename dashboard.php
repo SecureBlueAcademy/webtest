@@ -21,23 +21,23 @@ if ($time_filter !== 'all') {
         default: $cutoff = $now - 86400;
     }
     
-    $filtered_logs = array_filter($filtered_logs, function($log) use ($cutoff) {␊
+    $filtered_logs = array_filter($filtered_logs, function($log) use ($cutoff) {
         return strtotime($log['timestamp'] ?? '') >= $cutoff;
-    });␊
-}␊
-␊
-// Apply severity filter␊
-if (!empty($severity_filter)) {␊
-    $filtered_logs = array_filter($filtered_logs, function($log) use ($severity_filter) {␊
+    });
+}
+
+// Apply severity filter
+if (!empty($severity_filter)) {
+    $filtered_logs = array_filter($filtered_logs, function($log) use ($severity_filter) {
         return ($log['severity'] ?? '') === $severity_filter;
-    });␊
-}␊
+    });
+}
 
 // Apply same filters to alerts
 $filtered_alerts = $alerts;
-if ($time_filter !== 'all') {␊
-    $filtered_alerts = array_filter($filtered_alerts, function($alert) use ($cutoff) {␊
-        return strtotime($alert[1]) >= $cutoff;␊
+if ($time_filter !== 'all') {
+    $filtered_alerts = array_filter($filtered_alerts, function($alert) use ($cutoff) {
+        return strtotime($alert[1]) >= $cutoff;
     });
 }
 
@@ -48,36 +48,36 @@ if (!empty($severity_filter)) {
 }
 
 // Calculate stats with filters
-$totalEvents = count($filtered_logs);␊
-$activeAlerts = count(array_filter($filtered_alerts, function($alert) {␊
-    return $alert[5] !== 'resolved';␊
-}));␊
-$criticalEvents = count(array_filter($filtered_logs, function($log) {␊
+$totalEvents = count($filtered_logs);
+$activeAlerts = count(array_filter($filtered_alerts, function($alert) {
+    return $alert[5] !== 'resolved';
+}));
+$criticalEvents = count(array_filter($filtered_logs, function($log) {
     return ($log['severity'] ?? '') === 'critical';
-}));␊
-$highEvents = count(array_filter($filtered_logs, function($log) {␊
+}));
+$highEvents = count(array_filter($filtered_logs, function($log) {
     return ($log['severity'] ?? '') === 'high';
-}));␊
+}));
 
 // Calculate top event types
-$eventTypes = [];␊
-foreach ($filtered_logs as $log) {␊
+$eventTypes = [];
+foreach ($filtered_logs as $log) {
     $type = $log['event_category'] ?? ($log['log_type'] ?? 'Unknown');
-    $eventTypes[$type] = ($eventTypes[$type] ?? 0) + 1;␊
-}␊
-arsort($eventTypes);␊
-$topEventTypes = array_slice($eventTypes, 0, 5, true);␊
-␊
-// Calculate top log sources␊
-$logSources = [];␊
-foreach ($filtered_logs as $log) {␊
+    $eventTypes[$type] = ($eventTypes[$type] ?? 0) + 1;
+}
+arsort($eventTypes);
+$topEventTypes = array_slice($eventTypes, 0, 5, true);
+
+// Calculate top log sources
+$logSources = [];
+foreach ($filtered_logs as $log) {
     $source = $log['asset'] ?? 'unknown';
-    $logSources[$source] = ($logSources[$source] ?? 0) + 1;␊
-}␊
-arsort($logSources);␊
-$topLogSources = array_slice($logSources, 0, 5, true);␊
-␊
-// Get unique severities for filter␊
+    $logSources[$source] = ($logSources[$source] ?? 0) + 1;
+}
+arsort($logSources);
+$topLogSources = array_slice($logSources, 0, 5, true);
+
+// Get unique severities for filter
 $severities = array_unique(array_column($logs, 'severity'));
 ?>
 <!DOCTYPE html>
@@ -418,3 +418,4 @@ $severities = array_unique(array_column($logs, 'severity'));
 </body>
 
 </html>
+
