@@ -1,0 +1,11 @@
+Indicator Type,Value,Threat Family,Source,First Seen,Last Seen,Confidence,Description,Tags,Status
+Domain,malicious-example.com,DarkHydrus,OSINT,2024-05-02,2024-05-12,High,Known C2 domain for DarkHydrus campaigns,APT,Active
+IP,203.0.113.45,DarkHydrus,ThreatStream,2024-05-03,2024-05-11,Medium,Malicious IP observed in spearphishing beaconing,command and control,Active
+URL,https://malicious-example.com/login,Phobos,Retail Feed,2024-04-22,2024-05-10,High,Phishing landing page hosting credential harvester,phishing,Active
+SHA256,4f8f9a7e5b27a9c8a0d8ec4c4f27b6db98e0b1b5e77c4e5a91da9d1aeabcd123,LokiBot,MalwareBazaar,2024-04-10,2024-05-01,High,LokiBot payload hash harvested from sandbox runs,stealer,Contained
+Email,support@fakebank-security.com,Generic Phishing,OSINT,2024-05-05,2024-05-09,Low,Spoofed bank helpdesk address used in phishing kits,phishing,Suspicious
+Registry Key,HKCU\\Software\\BadActor\\Run,Custom RAT,Hunting Team,2024-03-12,2024-04-28,Medium,RAT persistence registry key observed in incidents,persistence,Active
+File Name,invoice_2024.exe,RansomX,IR Partner,2024-04-18,2024-05-08,Medium,Malicious lure executable delivered via spam,ransomware,Contained
+Behavior Signature,Spawned powershell -nop -w hidden from office process,Generic TTP,Hunting Team,2024-05-01,2024-05-12,High,Detected suspicious PowerShell execution chain,suspicious,Suspicious
+MD5,098f6bcd4621d373cade4e832627b4f6,TrickBot,MalwareBazaar,2024-04-20,2024-05-07,Medium,TrickBot loader hash,banking,Active
+IP,198.51.100.77,Phobos,ThreatStream,2024-05-06,2024-05-12,High,Active ransomware infrastructure node,ransomware,Active
