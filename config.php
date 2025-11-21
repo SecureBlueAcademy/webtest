@@ -19,8 +19,8 @@ header("Content-Security-Policy: default-src 'self' https://cdn.jsdelivr.net; im
 
 // Database configuration for user storage
 define('USERS_CSV', __DIR__ . '/data/users.csv');
-define('ALERTS_CSV', __DIR__ . '/data/alerts.csv');␊
-define('ASSETS_DIR', __DIR__ . '/data/assets/');␊
+define('ALERTS_CSV', __DIR__ . '/data/alerts.csv');
+define('ASSETS_DIR', __DIR__ . '/data/assets/');
 
 // Create data directory if it doesn't exist
 if (!file_exists(__DIR__ . '/data')) {
@@ -94,8 +94,8 @@ function readCSV($filename) {
     return $data;
 }
 
-function writeCSV($filename, $data) {␊
-    if (empty($data)) return false;␊
+function writeCSV($filename, $data) {
+    if (empty($data)) return false;
     
     // For users.csv, handle indexed arrays
     if (strpos($filename, 'users.csv') !== false) {
@@ -748,3 +748,4 @@ function initializeCSVFiles() {
 initializeCSVFiles();
 
 ?>
+
