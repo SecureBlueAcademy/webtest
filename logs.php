@@ -10,20 +10,20 @@ $filters = [];
 $exclude_filters = [];
 
 // Time filter
-$time_filter = $_GET['time_filter'] ?? '24h';
-$query = $_GET['query'] ?? '';
-$asset_filter = $_GET['asset'] ?? '';
-$log_type_filter = $_GET['log_type'] ?? '';
-$items_per_page = $_GET['per_page'] ?? 50;
-$page = $_GET['page'] ?? 1;
+$time_filter = getParam('time_filter', INPUT_GET, '24h');
+$query = trim(getParam('query'));
+$asset_filter = getParam('asset');
+$log_type_filter = getParam('log_type');
+$items_per_page = (int)(getParam('per_page') ?: 50);
+$page = (int)(getParam('page') ?: 1);
 
 // Custom date range
-$custom_start = $_GET['custom_start'] ?? '';
-$custom_end = $_GET['custom_end'] ?? '';
+$custom_start = getParam('custom_start');
+$custom_end = getParam('custom_end');
 
 // Handle exclude filters
 if (isset($_GET['exclude'])) {
-    $exclude_filters = $_GET['exclude'];
+    $exclude_filters = sanitizeArray($_GET['exclude']);
     if (!is_array($exclude_filters)) {
         $exclude_filters = [$exclude_filters];
     }
@@ -124,7 +124,7 @@ foreach ($filtered_logs as $log) {
 $timeline_data = $hourly_counts;
 
 // Get column preferences
-$visible_columns = $_GET['columns'] ?? 'timestamp,raw_log';
+$visible_columns = getParam('columns') ?: 'timestamp,asset,log_type,event_id,event_category,severity,event_summary,raw_log';
 $visible_columns = explode(',', $visible_columns);
 
 // Pagination
@@ -198,6 +198,10 @@ $column_definitions = [
     'timestamp' => ['Time', 'timestamp'],
     'asset' => ['Asset', 'asset'],
     'log_type' => ['Log Type', 'log_type'],
+    'event_id' => ['Event ID', 'event_id'],
+    'event_category' => ['Category', 'event_category'],
+    'severity' => ['Severity', 'severity'],
+    'event_summary' => ['Summary', 'event_summary'],
     'raw_log' => ['Raw Log', 'raw_log']
 ];
 
@@ -889,4 +893,5 @@ if (!empty($filtered_logs)) {
         });
     </script>
 </body>
+
 </html>
