@@ -1,0 +1,36 @@
+# CYBRIXEN SIEM - Secure .htaccess
+Options -Indexes
+
+# Allow access to main application files
+<Files ~ "\.(php|css|js|png|jpg|gif)$">
+    Order allow,deny
+    Allow from all
+</Files>
+
+# Block direct access to sensitive files
+<Files ~ "^(config|create_user)\.php$">
+    Order allow,deny
+    Deny from all
+</Files>
+
+# Block access to data directory and CSV files
+<Files ~ "\.(csv|log|sql|bak)$">
+    Order allow,deny
+    Deny from all
+</Files>
+
+# Block access to hidden files
+<Files ~ "^\.">
+    Order allow,deny
+    Deny from all
+</Files>
+
+# Security headers
+Header always set X-Content-Type-Options nosniff
+Header always set X-Frame-Options DENY
+Header always set X-XSS-Protection "1; mode=block"
+
+# Prevent access to data directory via URL
+RewriteEngine On
+RewriteRule ^data/ - [F]
+
