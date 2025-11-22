@@ -72,7 +72,6 @@ function getDetailFields(array $record): array {
         ['label' => 'Severity', 'value' => $record['severity'] ?? ''],
         ['label' => 'First Seen', 'value' => $record['first_seen'] ?? ''],
         ['label' => 'Last Seen', 'value' => $record['last_seen'] ?? ''],
-        ['label' => 'Confidence', 'value' => $record['confidence'] ?? ''],
     ];
 
     if (in_array($type, ['ip', 'ipv4', 'ipv6'], true)) {
@@ -404,6 +403,8 @@ function getDetailFields(array $record): array {
 
         .detail-card .value {
             font-weight: 600;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .list-section {
@@ -463,6 +464,8 @@ function getDetailFields(array $record): array {
             border-radius: 10px;
             border: 1px solid var(--border);
             color: var(--text);
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .muted {
