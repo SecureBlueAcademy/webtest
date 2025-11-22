@@ -290,7 +290,7 @@ function getDetailFields(array $record): array {
             position: relative;
             font-size: 2.2rem;
             font-weight: 700;
-            color: #f36c6c;
+            color: var(--accent-strong);
         }
 
         .score-total {
@@ -300,8 +300,8 @@ function getDetailFields(array $record): array {
         }
 
         .score-label {
-            font-weight: 600;
-            color: var(--muted);
+            font-weight: 700;
+            color: var(--text);
         }
 
         .ioc-header {
@@ -521,7 +521,7 @@ function getDetailFields(array $record): array {
                                 <div class="score-total">/ 100</div>
                             </div>
                         </div>
-                        <div class="score-label">Confidence Score</div>
+                        <div class="score-label">Confidence Score = <?= (int) round($clampedConfidence); ?></div>
                     </div>
                     <div class="ioc-header">
                         <h2><?= renderValue($match['ioc'] ?? ''); ?></h2>
