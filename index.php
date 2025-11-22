@@ -185,6 +185,63 @@ function renderValue(?string $value): string {
             margin-top: 28px;
         }
 
+        .result-top {
+            display: grid;
+            grid-template-columns: minmax(200px, 240px) 1fr;
+            gap: 16px;
+            align-items: stretch;
+        }
+
+        .score-card {
+            padding: 20px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 10px;
+        }
+
+        .score-ring {
+            width: 130px;
+            height: 130px;
+            border-radius: 50%;
+            background: conic-gradient(var(--danger) calc(var(--percent) * 1%), #0f1c2a 0);
+            display: grid;
+            place-items: center;
+            position: relative;
+        }
+
+        .score-ring::after {
+            content: '';
+            position: absolute;
+            inset: 10px;
+            background: var(--panel);
+            border-radius: 50%;
+        }
+
+        .score-number {
+            position: relative;
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #f36c6c;
+        }
+
+        .score-total {
+            position: relative;
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        .score-label {
+            font-weight: 600;
+            color: var(--muted);
+        }
+
         .ioc-header {
             padding: 24px;
             background: var(--panel);
@@ -323,6 +380,7 @@ function renderValue(?string $value): string {
             header { padding: 16px 20px; }
             main { padding: 14px 20px 40px; }
             .hero { padding: 24px; }
+            .result-top { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -345,16 +403,29 @@ function renderValue(?string $value): string {
 
         <?php if ($match !== null): ?>
             <section class="results" aria-live="polite">
-                <div class="ioc-header">
-                    <h2><?= renderValue($match['ioc'] ?? ''); ?></h2>
-                    <p class="meta-line">Exact match found in curated intelligence</p>
-                    <?php $tags = splitList($match['tags'] ?? ''); if (!empty($tags)): ?>
-                        <div class="tags">
-                            <?php foreach ($tags as $tag): ?>
-                                <span class="tag"><?= renderValue($tag); ?></span>
-                            <?php endforeach; ?>
+                <?php
+                    $confidenceValue = isset($match['confidence']) ? (float) $match['confidence'] : 0;
+                    $clampedConfidence = max(0, min(100, $confidenceValue));
+                ?>
+                <div class="result-top">
+                    <div class="score-card">
+                        <div class="score-ring" style="--percent: <?= $clampedConfidence; ?>;">
+                            <div class="score-number"><?= (int) round($clampedConfidence); ?></div>
+                            <div class="score-total">/ 100</div>
                         </div>
-                    <?php endif; ?>
+                        <div class="score-label">Confidence Score</div>
+                    </div>
+                    <div class="ioc-header">
+                        <h2><?= renderValue($match['ioc'] ?? ''); ?></h2>
+                        <p class="meta-line">Exact match found in curated intelligence</p>
+                        <?php $tags = splitList($match['tags'] ?? ''); if (!empty($tags)): ?>
+                            <div class="tags">
+                                <?php foreach ($tags as $tag): ?>
+                                    <span class="tag"><?= renderValue($tag); ?></span>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
                 </div>
 
                 <div class="tabs">
