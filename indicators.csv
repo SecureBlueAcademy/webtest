@@ -1,0 +1,4 @@
+ioc,type,threat_name,severity,first_seen,last_seen,confidence,tags,related_data,community
+malicious-example.com,Domain,Phishing kit host,High,2024-05-01,2024-06-15,92,phishing|credential-harvest|kit,http://malicious-example.com/login|198.51.100.77|5f4dcc3b5aa765d61d8327deb882cf99,Reported targeting finance employees|Login page mimics Microsoft 365
+45.77.23.12,IP,Botnet command node,Medium,2024-04-18,2024-06-20,78,botnet|c2|infrastructure,https://cdn-malware.example/download|sample-binary.exe|7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069,Observed beaconing every 5 minutes|Appears on regional ISP blacklist
+d41d8cd98f00b204e9800998ecf8427e,MD5,Loader payload hash,High,2024-03-05,2024-05-28,88,loader|ransomware|payload,203.0.113.45|hxxp://payload.example/update|8a7d2b71938df0cfd0f0f41ff7e6b2b94d0e93d1,Discussed in DFIR report #217|Likely packed with UPX
