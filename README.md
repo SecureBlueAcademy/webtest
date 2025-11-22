@@ -14,4 +14,4 @@ A lightweight static PHP interface for querying curated indicators of compromise
 ## Notes
 
 - The CSV data is only used for lookup; the full list is never exposed in the UI.
-- Add or modify IoC records in `indicators.csv` using the existing header row.
+- Add or modify IoC records in `indicators.csv` using the existing header row. The file includes columns for type-specific metadata (geo/ASN/provider for IPs, registrar/domain age/SSL issuer for domains, HTTP status for URLs, and file name/type/size/IMPHASH for file hashes) plus separated related data columns for files, IPs, domains, and URLs, and richer community insights.

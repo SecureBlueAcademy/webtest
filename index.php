@@ -62,6 +62,54 @@ if ($query !== '') {
 function renderValue(?string $value): string {
     return htmlspecialchars($value ?? '—', ENT_QUOTES, 'UTF-8');
 }
+
+function getDetailFields(array $record): array {
+    $type = strtolower(trim($record['type'] ?? ''));
+
+    $common = [
+        ['label' => 'Indicator Type', 'value' => $record['type'] ?? ''],
+        ['label' => 'Threat Name', 'value' => $record['threat_name'] ?? ''],
+        ['label' => 'Severity', 'value' => $record['severity'] ?? ''],
+        ['label' => 'First Seen', 'value' => $record['first_seen'] ?? ''],
+        ['label' => 'Last Seen', 'value' => $record['last_seen'] ?? ''],
+        ['label' => 'Confidence', 'value' => $record['confidence'] ?? ''],
+    ];
+
+    if (in_array($type, ['ip', 'ipv4', 'ipv6'], true)) {
+        $specific = [
+            ['label' => 'Geolocation', 'value' => $record['geo'] ?? ''],
+            ['label' => 'ASN', 'value' => $record['asn'] ?? ''],
+            ['label' => 'Provider', 'value' => $record['provider'] ?? ''],
+            ['label' => 'Behavior', 'value' => $record['behavior'] ?? ''],
+        ];
+    } elseif ($type === 'domain') {
+        $specific = [
+            ['label' => 'Registrar', 'value' => $record['registrar'] ?? ''],
+            ['label' => 'Domain Age', 'value' => $record['domain_age'] ?? ''],
+            ['label' => 'Hosting Geo', 'value' => $record['geo'] ?? ''],
+            ['label' => 'SSL Issuer', 'value' => $record['ssl_issuer'] ?? ''],
+            ['label' => 'Behavior', 'value' => $record['behavior'] ?? ''],
+        ];
+    } elseif ($type === 'url') {
+        $specific = [
+            ['label' => 'HTTP Status', 'value' => $record['url_status'] ?? ''],
+            ['label' => 'SSL Issuer', 'value' => $record['ssl_issuer'] ?? ''],
+            ['label' => 'Hosting ASN', 'value' => $record['asn'] ?? ''],
+            ['label' => 'Hosting Geo', 'value' => $record['geo'] ?? ''],
+            ['label' => 'Behavior', 'value' => $record['behavior'] ?? ''],
+        ];
+    } else {
+        $specific = [
+            ['label' => 'File Name', 'value' => $record['file_name'] ?? ''],
+            ['label' => 'File Type', 'value' => $record['file_type'] ?? ''],
+            ['label' => 'File Size', 'value' => $record['file_size'] ?? ''],
+            ['label' => 'IMPHASH', 'value' => $record['imphash'] ?? ''],
+            ['label' => 'Behavior', 'value' => $record['behavior'] ?? ''],
+        ];
+    }
+
+    return array_merge($common, $specific);
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -224,6 +272,21 @@ function renderValue(?string $value): string {
             border-radius: 50%;
         }
 
+        .score-inner {
+            position: relative;
+            display: grid;
+            place-items: center;
+            gap: 2px;
+        }
+
+        .score-caption {
+            font-size: 0.75rem;
+            letter-spacing: 0.04em;
+            color: var(--muted);
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
         .score-number {
             position: relative;
             font-size: 2.2rem;
@@ -349,6 +412,45 @@ function renderValue(?string $value): string {
             gap: 10px;
         }
 
+        .related-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
+
+        .related-group {
+            padding: 12px 14px;
+            background: #0f1c2a;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+
+        .related-group .label {
+            font-weight: 700;
+            color: var(--muted);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            font-size: 0.8rem;
+        }
+
+        .community-card {
+            padding: 12px 14px;
+            background: #0f1c2a;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            display: grid;
+            gap: 6px;
+        }
+
+        .community-title {
+            font-weight: 700;
+        }
+
+        .community-note {
+            color: var(--muted);
+        }
+
         .pill-row {
             display: flex;
             gap: 8px;
@@ -410,8 +512,11 @@ function renderValue(?string $value): string {
                 <div class="result-top">
                     <div class="score-card">
                         <div class="score-ring" style="--percent: <?= $clampedConfidence; ?>;">
-                            <div class="score-number"><?= (int) round($clampedConfidence); ?></div>
-                            <div class="score-total">/ 100</div>
+                            <div class="score-inner">
+                                <div class="score-caption">Confidence</div>
+                                <div class="score-number"><?= (int) round($clampedConfidence); ?></div>
+                                <div class="score-total">/ 100</div>
+                            </div>
                         </div>
                         <div class="score-label">Confidence Score</div>
                     </div>
@@ -435,51 +540,86 @@ function renderValue(?string $value): string {
                         <button class="tab-button" data-tab="community" role="tab" aria-selected="false">Community</button>
                     </div>
                     <div class="tab-content active" id="details" role="tabpanel">
+                        <?php $detailFields = getDetailFields($match); ?>
                         <div class="detail-grid">
-                            <div class="detail-card">
-                                <div class="label">Type</div>
-                                <div class="value"><?= renderValue($match['type'] ?? ''); ?></div>
-                            </div>
-                            <div class="detail-card">
-                                <div class="label">Threat Name</div>
-                                <div class="value"><?= renderValue($match['threat_name'] ?? ''); ?></div>
-                            </div>
-                            <div class="detail-card">
-                                <div class="label">Severity</div>
-                                <div class="value"><?= renderValue($match['severity'] ?? ''); ?></div>
-                            </div>
-                            <div class="detail-card">
-                                <div class="label">First Seen</div>
-                                <div class="value"><?= renderValue($match['first_seen'] ?? ''); ?></div>
-                            </div>
-                            <div class="detail-card">
-                                <div class="label">Last Seen</div>
-                                <div class="value"><?= renderValue($match['last_seen'] ?? ''); ?></div>
-                            </div>
-                            <div class="detail-card">
-                                <div class="label">Confidence</div>
-                                <div class="value"><?= renderValue($match['confidence'] ?? ''); ?></div>
-                            </div>
+                            <?php foreach ($detailFields as $detail): ?>
+                                <div class="detail-card">
+                                    <div class="label"><?= renderValue($detail['label'] ?? ''); ?></div>
+                                    <div class="value"><?= renderValue($detail['value'] ?? ''); ?></div>
+                                </div>
+                            <?php endforeach; ?>
                         </div>
                     </div>
                     <div class="tab-content" id="related" role="tabpanel">
-                        <?php $related = splitList($match['related_data'] ?? ''); ?>
-                        <?php if (!empty($related)): ?>
-                            <div class="list-section">
-                                <?php foreach ($related as $item): ?>
-                                    <div class="pill"><?= renderValue($item); ?></div>
-                                <?php endforeach; ?>
+                        <?php
+                            $relatedFiles = splitList($match['related_files'] ?? '');
+                            $relatedIps = splitList($match['related_ips'] ?? '');
+                            $relatedDomains = splitList($match['related_domains'] ?? '');
+                            $relatedUrls = splitList($match['related_urls'] ?? '');
+                        ?>
+                        <div class="related-grid">
+                            <div class="related-group">
+                                <div class="label">Related Files &amp; Hashes</div>
+                                <?php if (!empty($relatedFiles)): ?>
+                                    <div class="pill-row">
+                                        <?php foreach ($relatedFiles as $item): ?>
+                                            <div class="pill"><?= renderValue($item); ?></div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="muted">No file artifacts linked.</p>
+                                <?php endif; ?>
                             </div>
-                        <?php else: ?>
-                            <p class="muted">No related data available for this indicator.</p>
-                        <?php endif; ?>
+                            <div class="related-group">
+                                <div class="label">Related IPs</div>
+                                <?php if (!empty($relatedIps)): ?>
+                                    <div class="pill-row">
+                                        <?php foreach ($relatedIps as $item): ?>
+                                            <div class="pill"><?= renderValue($item); ?></div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="muted">No IPs associated.</p>
+                                <?php endif; ?>
+                            </div>
+                            <div class="related-group">
+                                <div class="label">Related Domains</div>
+                                <?php if (!empty($relatedDomains)): ?>
+                                    <div class="pill-row">
+                                        <?php foreach ($relatedDomains as $item): ?>
+                                            <div class="pill"><?= renderValue($item); ?></div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="muted">No domains associated.</p>
+                                <?php endif; ?>
+                            </div>
+                            <div class="related-group">
+                                <div class="label">Related URLs</div>
+                                <?php if (!empty($relatedUrls)): ?>
+                                    <div class="pill-row">
+                                        <?php foreach ($relatedUrls as $item): ?>
+                                            <div class="pill"><?= renderValue($item); ?></div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php else: ?>
+                                    <p class="muted">No URLs associated.</p>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     </div>
                     <div class="tab-content" id="community" role="tabpanel">
                         <?php $community = splitList($match['community'] ?? ''); ?>
                         <?php if (!empty($community)): ?>
                             <div class="list-section">
                                 <?php foreach ($community as $note): ?>
-                                    <div class="pill"><?= renderValue($note); ?></div>
+                                    <?php $parts = explode('::', $note, 2); ?>
+                                    <div class="community-card">
+                                        <div class="community-title"><?= renderValue($parts[0] ?? 'Community insight'); ?></div>
+                                        <?php if (isset($parts[1])): ?>
+                                            <div class="community-note"><?= renderValue($parts[1]); ?></div>
+                                        <?php endif; ?>
+                                    </div>
                                 <?php endforeach; ?>
                             </div>
                         <?php else: ?>
