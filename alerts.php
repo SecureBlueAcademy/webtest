@@ -68,9 +68,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'close_alert') {
         $alert = find_alert_by_id($alertId);
+        $hasNotes = isset($alert['notes']) && trim($alert['notes']) !== '';
+
         if ($alert
             && mb_strtolower($alert['assigned_to']) === mb_strtolower($username)
-            && !empty($alert['notes'])) {
+            && $hasNotes) {
             update_alert($alertId, function (&$a) {
                 if ($a['status'] !== 'closed') {
                     $a['status'] = 'closed';
@@ -538,17 +540,20 @@ $activeAlertId = $_GET['alert_id'] ?? null;
                                     <?= get_alert_description($alert) ?>
                                 </div>
                                 <div class="alert-actions">
-                                    <button type="button" class="btn" onclick="event.stopPropagation(); openNotesModal(
-                                        '<?= $alert['id'] ?>',
-                                        '<?= sanitize($alert['title']) ?>',
-                                        '<?= $alert['verdict'] ?>',
-                                        `<?= sanitize($alert['iocs_json'] ?: '[]') ?>`,
-                                        `<?= sanitize($alert['notes'] ?: '') ?>`
-                                    )">Notes</button>
+                                    <button
+                                        type="button"
+                                        class="btn"
+                                        data-alert-id="<?= $alert['id'] ?>"
+                                        data-title="<?= sanitize($alert['title']) ?>"
+                                        data-verdict="<?= sanitize($alert['verdict']) ?>"
+                                        data-iocs='<?= sanitize($alert['iocs_json'] ?: '[]') ?>'
+                                        data-notes="<?= sanitize($alert['notes'] ?? '') ?>"
+                                        onclick="event.stopPropagation(); openNotesModal(this);"
+                                    >Notes</button>
                                     <form method="post" style="display: inline;">
                                         <input type="hidden" name="alert_id" value="<?= $alert['id'] ?>">
                                         <input type="hidden" name="action" value="close_alert">
-                                        <button type="submit" class="btn success" <?= empty($alert['notes']) ? 'disabled' : '' ?>>Close</button>
+                                        <button type="submit" class="btn success" <?= trim($alert['notes'] ?? '') === '' ? 'disabled' : '' ?>>Close</button>
                                     </form>
                                 </div>
                             </div>
@@ -716,21 +721,26 @@ function selectAlert(alertId, filter) {
     window.location.href = 'alerts.php?filter=' + filter + '&alert_id=' + alertId;
 }
 
-function openNotesModal(alertId, title, verdict, iocsJsonStr, notes) {
-    console.log('Opening notes modal for alert:', alertId);
-    
-    // Set alert ID
-    document.getElementById('notes-alert-id').value = alertId;
-    
-    // Set modal title
-    document.getElementById('notes-modal-title').textContent = 'Notes for Alert #' + alertId + ' - ' + title;
+function openNotesModal(button) {
+    var alertId = button?.dataset?.alertId || '';
+    var title = button?.dataset?.title || '';
+    var verdict = button?.dataset?.verdict || '';
+    var iocsJsonStr = button?.dataset?.iocs || '[]';
+    var notes = button?.dataset?.notes || '';
 
-    // Reset and set verdict radios
+    document.getElementById('notes-alert-id').value = alertId;
+
+    var modalTitle = 'Notes for Alert #' + alertId;
+    if (title) {
+        modalTitle += ' - ' + title;
+    }
+    document.getElementById('notes-modal-title').textContent = modalTitle;
+
     var radios = document.querySelectorAll('#notes-form input[name="verdict"]');
-    radios.forEach(function (r) { 
-        r.checked = false; 
+    radios.forEach(function (r) {
+        r.checked = false;
     });
-    
+
     if (verdict === 'tp' || verdict === 'fp') {
         var targetRadio = document.querySelector('#notes-form input[name="verdict"][value="' + verdict + '"]');
         if (targetRadio) {
@@ -738,13 +748,11 @@ function openNotesModal(alertId, title, verdict, iocsJsonStr, notes) {
         }
     }
 
-    // Reset IoC table
     var tbody = document.querySelector('#ioc-table tbody');
     tbody.innerHTML = '';
-    
+
     var iocs = [];
     try {
-        // Clean the JSON string - remove backticks and sanitize
         iocsJsonStr = iocsJsonStr.replace(/`/g, '');
         iocs = JSON.parse(iocsJsonStr || '[]');
         if (!Array.isArray(iocs)) iocs = [];
@@ -753,26 +761,22 @@ function openNotesModal(alertId, title, verdict, iocsJsonStr, notes) {
         iocs = [];
     }
 
-    // Add IoC rows
     if (iocs.length === 0) {
-        addIocRow(); // Add one empty row by default
+        addIocRow();
     } else {
         iocs.forEach(function (ioc) {
             addIocRow(ioc.type || '', ioc.value || '');
         });
     }
 
-    // Set notes
     var notesTextarea = document.getElementById('notes-textarea');
     if (notesTextarea) {
         notesTextarea.value = notes.replace(/`/g, '') || '';
     }
 
-    // Show modal
     var modal = document.getElementById('notes-modal');
     if (modal) {
         modal.classList.add('active');
-        // Prevent body scroll when modal is open
         document.body.style.overflow = 'hidden';
     }
 }

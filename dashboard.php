@@ -9,7 +9,6 @@ $user   = current_user();
 // Counts
 $total = count($alerts);
 $pending = $ack = $closed = 0;
-$myAssigned = 0;
 $critical = $high = $medium = $low = 0;
 
 foreach ($alerts as $a) {
@@ -19,10 +18,6 @@ foreach ($alerts as $a) {
         $ack++;
     } elseif ($a['status'] === 'closed') {
         $closed++;
-    }
-    
-    if (mb_strtolower($a['assigned_to']) === mb_strtolower($user['username'])) {
-        $myAssigned++;
     }
     
     // Count by severity
@@ -171,13 +166,6 @@ $recentAlerts = array_slice($alerts, 0, 5);
                     <div class="stat-label">Total Alerts</div>
                     <div class="stat-value"><?= $total ?></div>
                     <div class="stat-trend info">All security alerts</div>
-                </div>
-                <div class="stat-card" onclick="window.location='alerts.php?filter=my'">
-                    <div class="stat-label">My Assigned</div>
-                    <div class="stat-value"><?= $myAssigned ?></div>
-                    <div class="stat-trend <?= $myAssigned > 0 ? 'negative' : 'positive' ?>">
-                        <?= $myAssigned > 0 ? 'Requires attention' : 'All clear' ?>
-                    </div>
                 </div>
                 <div class="stat-card" onclick="window.location='alerts.php?filter=pending'">
                     <div class="stat-label">Pending</div>
