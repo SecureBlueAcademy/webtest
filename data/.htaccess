@@ -1,0 +1,9 @@
+# data/.htaccess
+# Prevent direct web access to sensitive CSV backend files
+<FilesMatch "\.(csv|txt)$">
+    Require all denied
+</FilesMatch>
+
+# For older Apache versions:
+# Order allow,deny
+# Deny from all
