@@ -53,7 +53,9 @@ function load_users(): array
         return [];
     }
 
-    $rows = array_map('str_getcsv', file(USERS_CSV));
+    $rows = array_map(function ($line) {
+        return str_getcsv($line, ',', '"', '\\');
+    }, file(USERS_CSV));
     $users = [];
 
     foreach ($rows as $row) {
@@ -181,8 +183,11 @@ function load_alerts(): array
         return [];
     }
 
-    $rows = array_map('str_getcsv', file(ALERTS_CSV));
-    $alerts = [];
+    $rows = array_map(function ($line) {
+        return str_getcsv($line, ',', '"', '\\');
+    }, file(ALERTS_CSV));
+    $alertsById = [];
+    $hadDuplicates = false;
 
     foreach ($rows as $row) {
         if (!$row || trim($row[0] ?? '') === '') {
@@ -195,27 +200,119 @@ function load_alerts(): array
         }
 
         $row = array_map('trim', $row);
-        $row = array_pad($row, 10, '');
+        $row = array_pad($row, 12, '');
 
-        list($id, $title, $severity, $status, $assigned_to, $source, $created_at, $updated_at, $description, $iocs_json) = $row;
+        list(
+            $id,
+            $title,
+            $severity,
+            $status,
+            $assigned_to,
+            $source,
+            $created_at,
+            $updated_at,
+            $description,
+            $iocs_json,
+            $verdict,
+            $notes
+        ) = $row;
 
-        $alerts[] = [
+        $alert = [
             'id'          => $id,
             'title'       => $title,
-            'severity'    => strtolower($severity),
-            'status'      => strtolower($status),
+            'severity'    => strtolower($severity ?: 'low'),
+            'status'      => strtolower($status ?: 'pending'),
             'assigned_to' => $assigned_to,
             'source'      => $source,
-            'created_at'  => $created_at,
-            'updated_at'  => $updated_at,
+            'created_at'  => $created_at ?: date('Y-m-d H:i:s'),
+            'updated_at'  => $updated_at ?: $created_at,
             'description' => $description,
             'iocs_json'   => $iocs_json,
-            'verdict'     => '',
-            'notes'       => ''
+            'verdict'     => $verdict ?: '',
+            'notes'       => $notes ?: ''
         ];
+
+        $existing = $alertsById[$id] ?? null;
+        $existingTime = $existing ? strtotime($existing['updated_at'] ?: $existing['created_at']) : null;
+        $currentTime  = strtotime($alert['updated_at'] ?: $alert['created_at']);
+
+        if ($existing) {
+            $hadDuplicates = true;
+        }
+
+        if (!$existing || $currentTime >= $existingTime) {
+            $alertsById[$id] = $alert;
+        }
+    }
+
+    $alerts = array_values($alertsById);
+
+    usort($alerts, function ($a, $b) {
+        return strtotime($b['created_at'] ?? $b['id']) <=> strtotime($a['created_at'] ?? $a['id']);
+    });
+
+    // Rewrite the CSV if duplicates were found so future reads stay consistent
+    if ($hadDuplicates) {
+        save_alerts($alerts);
     }
 
     return $alerts;
+}
+
+function save_alerts(array $alerts): void
+{
+    $unique = [];
+
+    foreach ($alerts as $alert) {
+        if (empty($alert['id'])) {
+            continue;
+        }
+
+        $unique[$alert['id']] = array_merge(
+            [
+                'id'          => '',
+                'title'       => '',
+                'severity'    => 'low',
+                'status'      => 'pending',
+                'assigned_to' => '',
+                'source'      => '',
+                'created_at'  => '',
+                'updated_at'  => '',
+                'description' => '',
+                'iocs_json'   => '',
+                'verdict'     => '',
+                'notes'       => ''
+            ],
+            $alert
+        );
+    }
+
+    $alertsToSave = array_values($unique);
+
+    usort($alertsToSave, function ($a, $b) {
+        return strtotime($b['created_at'] ?? $b['id']) <=> strtotime($a['created_at'] ?? $a['id']);
+    });
+
+    $fp = fopen(ALERTS_CSV, 'w');
+    if ($fp) {
+        foreach ($alertsToSave as $alert) {
+            fputcsv($fp, [
+                $alert['id'],
+                $alert['title'],
+                $alert['severity'],
+                $alert['status'],
+                $alert['assigned_to'],
+                $alert['source'],
+                $alert['created_at'],
+                $alert['updated_at'],
+                $alert['description'],
+                $alert['iocs_json'] ?? '',
+                $alert['verdict'] ?? '',
+                $alert['notes'] ?? ''
+            ]);
+        }
+        fclose($fp);
+    }
 }
 
 function find_alert_by_id($alertId): ?array
@@ -238,26 +335,8 @@ function update_alert($alertId, callable $updater): void
             break;
         }
     }
-    
-    // Save updated alerts
-    $fp = fopen(ALERTS_CSV, 'w');
-    if ($fp) {
-        foreach ($alerts as $alert) {
-            fputcsv($fp, [
-                $alert['id'],
-                $alert['title'],
-                $alert['severity'],
-                $alert['status'],
-                $alert['assigned_to'],
-                $alert['source'],
-                $alert['created_at'],
-                $alert['updated_at'],
-                $alert['description'],
-                $alert['iocs_json'] ?? ''
-            ]);
-        }
-        fclose($fp);
-    }
+
+    save_alerts($alerts);
 }
 
 function append_submission($username, $alertId, $title, $verdict, $iocs, $notes): void
@@ -293,7 +372,9 @@ function update_submission($username, $alertId, $title, $verdict, $iocs, $notes)
     
     // Read existing submissions
     if ($fileExists) {
-        $rows = array_map('str_getcsv', file($filename));
+        $rows = array_map(function ($line) {
+            return str_getcsv($line, ',', '"', '\\');
+        }, file($filename));
         $header = array_shift($rows); // Remove header
         
         foreach ($rows as $row) {
