@@ -1,0 +1,9 @@
+# submitted-alerts/.htaccess
+# Block direct download of submitted alert CSVs
+<FilesMatch "\.(csv|txt)$">
+    Require all denied
+</FilesMatch>
+
+# For older Apache:
+# Order allow,deny
+# Deny from all
