@@ -9,69 +9,244 @@ $filtered_logs = $all_logs;
 $filters = [];
 $exclude_filters = [];
 
-// Time filter
-$time_filter = getParam('time_filter', INPUT_GET, '24h');
-$query = trim(getParam('query'));
-$asset_filter = getParam('asset');
-$log_type_filter = getParam('log_type');
-$items_per_page = (int)(getParam('per_page') ?: 50);
-$page = (int)(getParam('page') ?: 1);
+// Time filter - Set default to 'all'
+$time_filter = $_GET['time_filter'] ?? 'all';
+$query = $_GET['query'] ?? '';
+$asset_filter = $_GET['asset'] ?? '';
+$log_type_filter = $_GET['log_type'] ?? '';
+$items_per_page = $_GET['per_page'] ?? 50;
+$page = $_GET['page'] ?? 1;
 
 // Custom date range
-$custom_start = getParam('custom_start');
-$custom_end = getParam('custom_end');
+$custom_start = $_GET['custom_start'] ?? '';
+$custom_end = $_GET['custom_end'] ?? '';
+
+// Handle filters from URL parameters
+foreach ($_GET as $key => $value) {
+    if (!in_array($key, ['time_filter', 'query', 'asset', 'log_type', 'per_page', 'page', 'custom_start', 'custom_end', 'columns', 'exclude']) && $value !== '') {
+        $filters[$key] = $value;
+    }
+}
 
 // Handle exclude filters
 if (isset($_GET['exclude'])) {
-    $exclude_filters = sanitizeArray($_GET['exclude']);
+    $exclude_filters = $_GET['exclude'];
     if (!is_array($exclude_filters)) {
         $exclude_filters = [$exclude_filters];
     }
 }
 
-// Apply query filter
+// ---------------------------------------------------------
+// QUERY PARSER ENGINE (Recursive Descent for AND/OR/NOT)
+// ---------------------------------------------------------
+
+function parseQuerySyntax($query, $logs) {
+    $tokens = tokenizeQuery($query);
+    if (empty($tokens)) return $logs;
+    
+    $index = 0;
+    $expression = parseExpression($tokens, $index);
+    
+    return array_filter($logs, function($log) use ($expression) {
+        return evaluateCondition($log, $expression);
+    });
+}
+
+function tokenizeQuery($query) {
+    $tokens = [];
+    $length = strlen($query);
+    $i = 0;
+    
+    while ($i < $length) {
+        $char = $query[$i];
+        
+        if (ctype_space($char)) {
+            $i++;
+            continue;
+        }
+        
+        if ($char === '(' || $char === ')') {
+            $tokens[] = $char;
+            $i++;
+            continue;
+        }
+        
+        if ($char === '"' || $char === "'") {
+            $quote = $char;
+            $str = '';
+            $i++;
+            while ($i < $length && $query[$i] !== $quote) {
+                if ($query[$i] === '\\' && isset($query[$i+1])) {
+                    $str .= $query[$i+1];
+                    $i += 2;
+                } else {
+                    $str .= $query[$i];
+                    $i++;
+                }
+            }
+            $tokens[] = $str; 
+            $i++; 
+            continue;
+        }
+        
+        if ($i + 1 < $length) {
+            $twoChars = substr($query, $i, 2);
+            if (in_array($twoChars, ['!=', '!~', '>=', '<='])) {
+                $tokens[] = $twoChars;
+                $i += 2;
+                continue;
+            }
+        }
+        
+        if (strpos('=~><', $char) !== false) {
+            $tokens[] = $char;
+            $i++;
+            continue;
+        }
+        
+        $word = '';
+        while ($i < $length && !ctype_space($query[$i]) && strpos('()=~><!"\'', $query[$i]) === false) {
+            $word .= $query[$i];
+            $i++;
+        }
+        if ($word !== '') {
+            $tokens[] = $word;
+        }
+    }
+    return $tokens;
+}
+
+function parseExpression(&$tokens, &$index) {
+    $left = parseTerm($tokens, $index);
+    while (isset($tokens[$index]) && strtoupper($tokens[$index]) === 'OR') {
+        $index++;
+        $right = parseTerm($tokens, $index);
+        $left = ['operator' => 'OR', 'left' => $left, 'right' => $right];
+    }
+    return $left;
+}
+
+function parseTerm(&$tokens, &$index) {
+    $left = parseFactor($tokens, $index);
+    while (isset($tokens[$index]) && strtoupper($tokens[$index]) === 'AND') {
+        $index++;
+        $right = parseFactor($tokens, $index);
+        $left = ['operator' => 'AND', 'left' => $left, 'right' => $right];
+    }
+    return $left;
+}
+
+function parseFactor(&$tokens, &$index) {
+    if (!isset($tokens[$index])) return null;
+
+    $token = $tokens[$index];
+    
+    if (strtoupper($token) === 'NOT') {
+        $index++;
+        $operand = parseFactor($tokens, $index);
+        return ['operator' => 'NOT', 'operand' => $operand];
+    }
+    
+    if ($token === '(') {
+        $index++;
+        $expr = parseExpression($tokens, $index);
+        if (isset($tokens[$index]) && $tokens[$index] === ')') {
+            $index++;
+        }
+        return $expr;
+    }
+    
+    if (isset($tokens[$index+1]) && isset($tokens[$index+2])) {
+        $op = $tokens[$index+1];
+        if (in_array($op, ['=', '!=', '~', '!~', '>', '<', '>=', '<='])) {
+            $field = $tokens[$index];
+            $operator = $tokens[$index+1];
+            $value = $tokens[$index+2];
+            $index += 3;
+            return ['type' => 'condition', 'field' => $field, 'operator' => $operator, 'value' => $value];
+        }
+    }
+    
+    $value = $tokens[$index];
+    $index++;
+    return ['type' => 'condition', 'field' => 'raw_log', 'operator' => '~', 'value' => $value];
+}
+
+function evaluateCondition($log, $condition) {
+    if (!$condition) return true;
+
+    if (isset($condition['operator'])) {
+        if ($condition['operator'] === 'AND') {
+            return evaluateCondition($log, $condition['left']) && evaluateCondition($log, $condition['right']);
+        } elseif ($condition['operator'] === 'OR') {
+            return evaluateCondition($log, $condition['left']) || evaluateCondition($log, $condition['right']);
+        } elseif ($condition['operator'] === 'NOT') {
+            return !evaluateCondition($log, $condition['operand']);
+        }
+    }
+    
+    if (isset($condition['type']) && $condition['type'] === 'condition') {
+        $field = $condition['field'];
+        $log_val = isset($log[$field]) ? (string)$log[$field] : '';
+        $search_val = (string)$condition['value'];
+        
+        switch ($condition['operator']) {
+            case '=': return strcasecmp($log_val, $search_val) === 0;
+            case '!=': return strcasecmp($log_val, $search_val) !== 0;
+            case '~': return stripos($log_val, $search_val) !== false;
+            case '!~': return stripos($log_val, $search_val) === false;
+            case '>': return $log_val > $search_val;
+            case '<': return $log_val < $search_val;
+            case '>=': return $log_val >= $search_val;
+            case '<=': return $log_val <= $search_val;
+        }
+    }
+    return false;
+}
+
+// ---------------------------------------------------------
+// APPLY FILTERS - FIXED ASSET FILTER ISSUE
+// ---------------------------------------------------------
+
+// 1. Apply query filter
 if (!empty($query)) {
-    $filtered_logs = parseQuerySyntax($query, $filtered_logs);
+    try {
+        $filtered_logs = parseQuerySyntax($query, $filtered_logs);
+    } catch (Exception $e) {
+        $filtered_logs = []; 
+    }
 }
 
-// Apply asset filter
-if (!empty($asset_filter)) {
-    $filtered_logs = array_filter($filtered_logs, function($log) use ($asset_filter) {
-        return ($log['asset'] ?? '') === $asset_filter;
-    });
-}
-
-// Apply log type filter
-if (!empty($log_type_filter)) {
-    $filtered_logs = array_filter($filtered_logs, function($log) use ($log_type_filter) {
-        return ($log['log_type'] ?? '') === $log_type_filter;
-    });
-}
-
-// Apply exclude filters
-foreach ($exclude_filters as $exclude_filter) {
-    list($field, $value) = explode(':', $exclude_filter);
+// 2. Apply regular filters (AND logic) - FIXED: Proper field checking
+foreach ($filters as $field => $value) {
     $filtered_logs = array_filter($filtered_logs, function($log) use ($field, $value) {
-        return ($log[$field] ?? '') !== $value;
+        // Check if field exists and has value
+        $log_value = isset($log[$field]) ? (string)$log[$field] : '';
+        return $log_value !== '' && $log_value === (string)$value;
     });
 }
 
-// Apply time filter
+// 3. Apply exclude filters
+foreach ($exclude_filters as $exclude_filter) {
+    $parts = explode(':', $exclude_filter, 2); 
+    if(count($parts) === 2) {
+        $field = $parts[0];
+        $value = $parts[1];
+        $filtered_logs = array_filter($filtered_logs, function($log) use ($field, $value) {
+            $log_value = isset($log[$field]) ? (string)$log[$field] : '';
+            return $log_value === '' || $log_value !== (string)$value;
+        });
+    }
+}
+
+// 4. Apply time filter
 if ($time_filter !== 'all') {
     $now = time();
     switch ($time_filter) {
-        case '1h':
-            $cutoff = $now - 3600;
-            break;
-        case '24h':
-            $cutoff = $now - 86400;
-            break;
-        case '7d':
-            $cutoff = $now - 604800;
-            break;
-        case '30d':
-            $cutoff = $now - 2592000;
-            break;
+        case '1h': $cutoff = $now - 3600; break;
+        case '24h': $cutoff = $now - 86400; break;
+        case '7d': $cutoff = $now - 604800; break;
+        case '30d': $cutoff = $now - 2592000; break;
         case 'custom':
             if (!empty($custom_start)) {
                 $cutoff = strtotime($custom_start);
@@ -80,8 +255,7 @@ if ($time_filter !== 'all') {
                 $cutoff = $now - 86400;
             }
             break;
-        default:
-            $cutoff = $now - 86400;
+        default: $cutoff = $now - 86400;
     }
     
     if ($time_filter === 'custom' && !empty($custom_start)) {
@@ -105,27 +279,37 @@ $timeline_data = [];
 $hourly_counts = [];
 $now = time();
 
-// Initialize hourly buckets for last 24 hours
 for ($i = 23; $i >= 0; $i--) {
     $hour_start = $now - ($i * 3600);
     $hour_label = date('H:00', $hour_start);
     $hourly_counts[$hour_label] = 0;
 }
 
-// Count events per hour
 foreach ($filtered_logs as $log) {
     $log_time = strtotime($log['timestamp'] ?? '');
-    $hour_label = date('H:00', $log_time);
-    if (isset($hourly_counts[$hour_label])) {
-        $hourly_counts[$hour_label]++;
+    if ($log_time) {
+        $hour_label = date('H:00', $log_time);
+        if (isset($hourly_counts[$hour_label])) {
+            $hourly_counts[$hour_label]++;
+        }
     }
 }
-
 $timeline_data = $hourly_counts;
 
-// Get column preferences
-$visible_columns = getParam('columns') ?: 'timestamp,asset,log_type,event_id,event_category,severity,event_summary,raw_log';
+// ---------------------------------------------------------
+// COLUMN MANAGEMENT LOGIC
+// ---------------------------------------------------------
+
+$default_columns = ['timestamp', 'raw_log'];
+$visible_columns = $_GET['columns'] ?? implode(',', $default_columns);
 $visible_columns = explode(',', $visible_columns);
+
+// Ensure default columns are always included
+foreach ($default_columns as $default_col) {
+    if (!in_array($default_col, $visible_columns)) {
+        $visible_columns[] = $default_col;
+    }
+}
 
 // Pagination
 $total_logs = count($filtered_logs);
@@ -135,81 +319,37 @@ $page = max(1, min($page, $total_pages));
 $offset = ($page - 1) * $items_per_page;
 $paginated_logs = array_slice($filtered_logs, $offset, $items_per_page);
 
-// Get unique values for filters based on filtered data
-$assets = array_unique(array_column($filtered_logs, 'asset'));
-$log_types = array_unique(array_column($filtered_logs, 'log_type'));
-
-// Get top values for each field for the sidebar with counts
-$asset_counts = array_count_values(array_column($filtered_logs, 'asset'));
-arsort($asset_counts);
-$top_assets = array_slice($asset_counts, 0, 10, true);
-
-$log_type_counts = array_count_values(array_column($filtered_logs, 'log_type'));
-arsort($log_type_counts);
-$top_log_types = array_slice($log_type_counts, 0, 10, true);
-
-// Function to parse query syntax
-function parseQuerySyntax($query, $logs) {
-    $conditions = [];
-    
-    // Split by AND/OR but preserve quoted strings
-    preg_match_all('/([a-zA-Z_]+)\s*([=!<>~]+)\s*[\'"]?([^\'"\s]+)[\'"]?/', $query, $matches, PREG_SET_ORDER);
-    
-    foreach ($matches as $match) {
-        $field = strtolower(trim($match[1]));
-        $operator = trim($match[2]);
-        $value = trim($match[3]);
-        
-        $conditions[] = ['field' => $field, 'operator' => $operator, 'value' => $value];
-    }
-    
-    // Apply conditions
-    if (!empty($conditions)) {
-        $logs = array_filter($logs, function($log) use ($conditions) {
-            foreach ($conditions as $condition) {
-                $log_value = $log[$condition['field']] ?? '';
-                $match = false;
-                
-                switch ($condition['operator']) {
-                    case '=':
-                        $match = (strcasecmp($log_value, $condition['value']) === 0);
-                        break;
-                    case '!=':
-                        $match = (strcasecmp($log_value, $condition['value']) !== 0);
-                        break;
-                    case '~': // Contains
-                        $match = (stripos($log_value, $condition['value']) !== false);
-                        break;
-                }
-                
-                if (!$match) {
-                    return false;
-                }
+// Sidebar Statistics - FIXED: Proper field aggregation
+$all_fields = [];
+foreach ($filtered_logs as $log) {
+    foreach ($log as $field => $value) {
+        if (!in_array($field, ['_source_file', 'raw_log']) && $value !== '') {
+            if (!isset($all_fields[$field])) {
+                $all_fields[$field] = [];
             }
-            return true;
-        });
+            $valStr = (string)$value;
+            $all_fields[$field][$valStr] = ($all_fields[$field][$valStr] ?? 0) + 1;
+        }
     }
-    
-    return $logs;
 }
 
-// Dynamic column definitions based on available fields
+$field_values_with_counts = [];
+foreach ($all_fields as $field => $values) {
+    arsort($values);
+    $field_values_with_counts[$field] = array_slice($values, 0, 10, true);
+}
+
+// Dynamic column definitions (Scanning logs for all possible fields)
 $column_definitions = [
     'timestamp' => ['Time', 'timestamp'],
-    'asset' => ['Asset', 'asset'],
-    'log_type' => ['Log Type', 'log_type'],
-    'event_id' => ['Event ID', 'event_id'],
-    'event_category' => ['Category', 'event_category'],
-    'severity' => ['Severity', 'severity'],
-    'event_summary' => ['Summary', 'event_summary'],
     'raw_log' => ['Raw Log', 'raw_log']
 ];
 
-// Add dynamic fields from the first log entry if available
-if (!empty($filtered_logs)) {
-    $sample_log = $filtered_logs[0];
-    foreach ($sample_log as $key => $value) {
-        if (!in_array($key, ['timestamp', 'asset', 'log_type', 'raw_log', '_source_file']) && !isset($column_definitions[$key])) {
+// Scan a sample of logs to find all available keys
+$scan_limit = min(50, count($filtered_logs));
+for($i=0; $i < $scan_limit; $i++) {
+    foreach ($filtered_logs[$i] as $key => $value) {
+        if (!in_array($key, ['timestamp', 'raw_log', '_source_file']) && !isset($column_definitions[$key])) {
             $column_definitions[$key] = [ucfirst(str_replace('_', ' ', $key)), $key];
         }
     }
@@ -222,36 +362,33 @@ if (!empty($filtered_logs)) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CYBRIXEN SIEM - Log Analysis</title>
     <?php $BASE = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/'; ?>
-    <link rel="stylesheet" href="<?= $BASE ?>styles.css?v=5">
+    <link rel="stylesheet" href="<?= $BASE ?>styles.css?v=8">
     <script src="js/app.js"></script>
-    <script src="js/charts.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div class="app">
-        <!-- Enhanced Sidebar -->
         <nav class="sidebar">
             <div class="sidebar-header">
                 <button class="sidebar-toggle">☰</button>
                 <h1>CYBRIXEN SIEM</h1>
-                <span class="badge">v2.1</span>
             </div>
             <div class="nav-menu">
                 <button class="nav-item" onclick="location.href='dashboard.php'">
                     <span class="nav-icon">📊</span>
                     <span class="nav-text">Dashboard</span>
                 </button>
+                <button class="nav-item" onclick="location.href='assets.php'">
+                    <span class="nav-icon">🖥️</span>
+                    <span class="nav-text">Assets & Log Sources</span>
+                </button>
                 <button class="nav-item active" onclick="location.href='logs.php'">
                     <span class="nav-icon">📋</span>
                     <span class="nav-text">Log Analysis</span>
                 </button>
-                <button class="nav-item" onclick="location.href='alerts.php'">
+                <button class="nav-item">
                     <span class="nav-icon">🚨</span>
-                    <span class="nav-text">Alerts & Incidents</span>
-                </button>
-                <button class="nav-item" onclick="location.href='assets.php'">
-                    <span class="nav-icon">🖥️</span>
-                    <span class="nav-text">Assets & Log Sources</span>
+                    <span class="nav-text">Alerts</span>
                 </button>
                 <?php if ($_SESSION['role'] === 'admin'): ?>
                 <button class="nav-item" onclick="location.href='admin.php'">
@@ -260,13 +397,8 @@ if (!empty($filtered_logs)) {
                 </button>
                 <?php endif; ?>
 
-                <!-- Additional SIEM Features -->
                 <div class="sidebar-section">
                     <div class="sidebar-section-title">Investigation</div>
-                    <button class="nav-item">
-                        <span class="nav-icon">🔍</span>
-                        <span class="nav-text">Search & Investigate</span>
-                    </button>
                     <button class="nav-item">
                         <span class="nav-icon">📈</span>
                         <span class="nav-text">Threat Hunting</span>
@@ -281,15 +413,11 @@ if (!empty($filtered_logs)) {
                     <div class="sidebar-section-title">Management</div>
                     <button class="nav-item">
                         <span class="nav-icon">⚙️</span>
-                        <span class="nav-text">System Settings</span>
+                        <span class="nav-text">Settings</span>
                     </button>
                     <button class="nav-item">
                         <span class="nav-icon">👥</span>
                         <span class="nav-text">User Management</span>
-                    </button>
-                    <button class="nav-item">
-                        <span class="nav-icon">🛡️</span>
-                        <span class="nav-text">Security Policies</span>
                     </button>
                 </div>
 
@@ -303,150 +431,126 @@ if (!empty($filtered_logs)) {
                         <span class="nav-icon">📉</span>
                         <span class="nav-text">Dashboards</span>
                     </button>
-                    <button class="nav-item">
-                        <span class="nav-icon">🔔</span>
-                        <span class="nav-text">Notifications</span>
-                    </button>
                 </div>
 
                 <button class="nav-item" onclick="location.href='logout.php'">
                     <span class="nav-icon">🚪</span>
-                    <span class="nav-text">Logout (<?php echo escapeHtml($_SESSION['username']); ?>)</span>
+                    <span class="nav-text">Logout (<?php echo htmlspecialchars($_SESSION['username']); ?>)</span>
                 </button>
             </div>
         </nav>
 
-        <!-- Main Content -->
         <main class="main-content">
             <header class="header">
                 <h2>Log Analysis</h2>
                 <div class="toolbar">
                     <button class="btn" onclick="location.reload()">Refresh</button>
                     <button class="btn primary" onclick="clearFilters()">Clear Filters</button>
-                    <button class="btn" onclick="exportLogs()">Export Results</button>
-                    <button class="btn" onclick="showColumnsModal()">Manage Columns</button>
                 </div>
             </header>
 
-            <!-- Field Rail & Main Column -->
             <div style="display:grid; grid-template-columns: 240px 1fr; min-height:0;">
-                <!-- Enhanced Field Rail -->
                 <aside class="field-rail">
                     <h4>Quick Filters</h4>
-                    
-                    <!-- Assets -->
-                    <div class="field-group">
-                        <div class="field-header" onclick="toggleFieldGroup('assets')">
-                            <span>Assets (<?php echo count($top_assets); ?>)</span>
-                            <span class="toggle-icon">▼</span>
-                        </div>
-                        <div class="field-list" id="assets-list" style="display: none;">
-                            <?php foreach($top_assets as $asset => $count): ?>
-                            <div class="field-item">
-                                <span class="field-item-label"><?php echo $asset; ?> (<?php echo $count; ?>)</span>
-                                <div class="field-actions">
-                                    <button class="add-filter-btn" title="Add to filter" onclick="addToFilter('asset', '<?php echo $asset; ?>')">+</button>
-                                    <button class="exclude-filter-btn" title="Exclude from filter" onclick="addExcludeFilter('asset', '<?php echo $asset; ?>')">-</button>
-                                </div>
+                    <div class="field-rail-content">
+                        <?php foreach($field_values_with_counts as $field => $values): ?>
+                        <div class="field-group">
+                            <div class="field-header" onclick="toggleFieldGroup('<?php echo $field; ?>')">
+                                <span><?php echo ucfirst(str_replace('_', ' ', $field)); ?> (<?php echo count($values); ?>)</span>
+                                <span class="toggle-icon">▼</span>
                             </div>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-
-                    <!-- Log Types -->
-                    <div class="field-group">
-                        <div class="field-header" onclick="toggleFieldGroup('log-types')">
-                            <span>Log Types (<?php echo count($top_log_types); ?>)</span>
-                            <span class="toggle-icon">▼</span>
-                        </div>
-                        <div class="field-list" id="log-types-list" style="display: none;">
-                            <?php foreach($top_log_types as $log_type => $count): ?>
-                            <div class="field-item">
-                                <span class="field-item-label"><?php echo $log_type; ?> (<?php echo $count; ?>)</span>
-                                <div class="field-actions">
-                                    <button class="add-filter-btn" title="Add to filter" onclick="addToFilter('log_type', '<?php echo $log_type; ?>')">+</button>
-                                    <button class="exclude-filter-btn" title="Exclude from filter" onclick="addExcludeFilter('log_type', '<?php echo $log_type; ?>')">-</button>
+                            <div class="field-list" id="<?php echo $field; ?>-list" style="display: none;">
+                                <?php foreach($values as $value => $count): ?>
+                                <div class="field-item">
+                                    <span class="field-item-label"><?php echo htmlspecialchars($value); ?> (<?php echo $count; ?>)</span>
+                                    <div class="field-actions">
+                                        <button class="add-filter-btn" title="Add to filter" 
+                                            onclick='addToFilter(<?php echo json_encode($field); ?>, <?php echo json_encode($value); ?>)'>+</button>
+                                        <button class="exclude-filter-btn" title="Exclude from filter" 
+                                            onclick='addExcludeFilter(<?php echo json_encode($field); ?>, <?php echo json_encode($value); ?>)'>-</button>
+                                    </div>
                                 </div>
+                                <?php endforeach; ?>
                             </div>
-                            <?php endforeach; ?>
                         </div>
+                        <?php endforeach; ?>
                     </div>
                 </aside>
 
-                <!-- Column -->
                 <section style="display:flex; flex-direction:column; min-width:0;">
-                    <!-- Query Bar with Custom Date Range -->
                     <form method="GET" id="filter-form" class="query-bar">
+                        <input type="hidden" name="columns" id="columns-input" value="<?php echo implode(',', $visible_columns); ?>">
+                        
                         <div class="query-input-container">
-                            <input type="text" name="query" class="query-syntax-input" placeholder="Enter query (e.g., asset='windows-workstation' AND log_type='security')" value="<?php echo escapeHtml($query); ?>">
+                            <input type="text" name="query" class="query-syntax-input" 
+                                placeholder="Enter query (e.g. status='failed' AND (user='admin' OR ip='10.0.0.1'))" 
+                                value="<?php echo htmlspecialchars($query); ?>">
                             <div class="query-help">
                                 <button type="button" class="help-icon" title="Query Help">?</button>
                                 <div class="help-tooltip">
                                     <h4>Query Syntax Help</h4>
-                                    <p>Supported fields: asset, log_type, and any field from log entries</p>
-                                    <p>Operators: =, !=, ~ (contains)</p>
-                                    <div class="help-example">
-                                        <strong>Examples:</strong><br>
-                                        asset='windows-workstation' AND log_type='security'<br>
-                                        user~'admin' AND result='Success'<br>
-                                        client_ip='192.168.1.45' OR src_ip='192.168.1.45'
-                                    </div>
+                                    <p>Fields: asset, log_type, user, event_id, etc.</p>
+                                    <p>Operators: =, !=, ~, !~, >, <, NOT</p>
+                                    <p>Logic: AND, OR, ( )</p>
                                 </div>
                             </div>
                         </div>
                         
-                        <select name="time_filter" class="btn" id="time-filter-select" onchange="toggleCustomDateRange()">
-                            <option value="1h" <?php echo $time_filter === '1h' ? 'selected' : ''; ?>>Last 1 hour</option>
-                            <option value="24h" <?php echo $time_filter === '24h' ? 'selected' : ''; ?>>Last 24 hours</option>
-                            <option value="7d" <?php echo $time_filter === '7d' ? 'selected' : ''; ?>>Last 7 days</option>
-                            <option value="30d" <?php echo $time_filter === '30d' ? 'selected' : ''; ?>>Last 30 days</option>
-                            <option value="custom" <?php echo $time_filter === 'custom' ? 'selected' : ''; ?>>Custom Range</option>
-                            <option value="all" <?php echo $time_filter === 'all' ? 'selected' : ''; ?>>All time</option>
-                        </select>
+                        <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <select name="time_filter" class="btn" id="time-filter-select" onchange="toggleCustomDateRange()">
+                                <option value="1h" <?php echo $time_filter === '1h' ? 'selected' : ''; ?>>Last 1 hour</option>
+                                <option value="24h" <?php echo $time_filter === '24h' ? 'selected' : ''; ?>>Last 24 hours</option>
+                                <option value="7d" <?php echo $time_filter === '7d' ? 'selected' : ''; ?>>Last 7 days</option>
+                                <option value="30d" <?php echo $time_filter === '30d' ? 'selected' : ''; ?>>Last 30 days</option>
+                                <option value="custom" <?php echo $time_filter === 'custom' ? 'selected' : ''; ?>>Custom Range</option>
+                                <option value="all" <?php echo $time_filter === 'all' ? 'selected' : ''; ?>>All time</option>
+                            </select>
+
+                            <div id="custom-date-range" style="display: none; gap: 0.5rem; align-items: center;">
+                                <input type="datetime-local" name="custom_start" class="btn" style="max-width: 190px;" value="<?php echo htmlspecialchars($custom_start); ?>">
+                                <span style="color: #9db0d7;">to</span>
+                                <input type="datetime-local" name="custom_end" class="btn" style="max-width: 190px;" value="<?php echo htmlspecialchars($custom_end); ?>">
+                            </div>
+                        </div>
 
                         <button type="submit" class="btn primary">Search</button>
                     </form>
 
-                    <!-- Active Filters -->
                     <div class="filter-pills" id="active-filters">
                         <?php if(!empty($query)): ?>
                         <div class="pill">
-                            Query: "<?php echo escapeHtml($query); ?>"
+                            Query: "<?php echo htmlspecialchars($query); ?>"
                             <button type="button" onclick="removeFilter('query')">×</button>
                         </div>
                         <?php endif; ?>
-                        <?php if(!empty($asset_filter)): ?>
+                        <?php foreach($filters as $field => $value): ?>
                         <div class="pill">
-                            Asset: <?php echo $asset_filter; ?>
-                            <button type="button" onclick="removeFilter('asset')">×</button>
+                            <?php echo ucfirst(str_replace('_', ' ', $field)); ?>: <?php echo htmlspecialchars($value); ?>
+                            <button type="button" onclick="removeFilter('<?php echo $field; ?>')">×</button>
                         </div>
-                        <?php endif; ?>
-                        <?php if(!empty($log_type_filter)): ?>
-                        <div class="pill">
-                            Log Type: <?php echo $log_type_filter; ?>
-                            <button type="button" onclick="removeFilter('log_type')">×</button>
-                        </div>
-                        <?php endif; ?>
+                        <?php endforeach; ?>
                         <?php foreach($exclude_filters as $exclude_filter): ?>
-                        <?php list($field, $value) = explode(':', $exclude_filter); ?>
+                        <?php 
+                            $parts = explode(':', $exclude_filter, 2);
+                            $dispField = $parts[0] ?? '?';
+                            $dispValue = $parts[1] ?? '?';
+                        ?>
                         <div class="pill exclude">
-                            Not <?php echo $field; ?>: <?php echo $value; ?>
-                            <button type="button" onclick="removeExcludeFilter('<?php echo $exclude_filter; ?>')">×</button>
+                            NOT <?php echo htmlspecialchars($dispField); ?>: <?php echo htmlspecialchars($dispValue); ?>
+                            <button type="button" onclick="removeExcludeFilter('<?php echo htmlspecialchars($exclude_filter); ?>')">×</button>
                         </div>
                         <?php endforeach; ?>
                     </div>
 
-                    <!-- Timeline Chart -->
                     <div class="timeline-card">
                         <div class="card-header">
-                            <h3>Event Timeline (Last 24 Hours)</h3>
+                            <h3>Event Timeline</h3>
                         </div>
                         <div class="timeline-container">
                             <canvas id="timeline-chart" height="80"></canvas>
                         </div>
                     </div>
 
-                    <!-- Logs Table -->
                     <div class="card" style="margin:0; border:none; border-radius:0; flex:1; display:flex; flex-direction:column; min-height:0;">
                         <div class="card-header">
                             <h3>Log Events</h3>
@@ -463,53 +567,40 @@ if (!empty($filtered_logs)) {
                             <table id="logs-table">
                                 <thead>
                                     <tr>
-                                        <?php 
-                                        foreach ($visible_columns as $column): 
-                                            if (isset($column_definitions[$column])):
-                                        ?>
+                                        <?php foreach ($visible_columns as $column): if (isset($column_definitions[$column])): ?>
                                         <th class="table-column" data-column="<?php echo $column; ?>">
                                             <div class="column-header">
                                                 <span><?php echo $column_definitions[$column][0]; ?></span>
-                                                <div class="column-actions">
-                                                    <button class="remove-column-btn" onclick="removeColumn('<?php echo $column; ?>')" title="Remove column">
-                                                        <span class="icon-table-remove">📊−</span>
-                                                    </button>
-                                                </div>
+                                                <?php if (!in_array($column, ['timestamp', 'raw_log'])): ?>
+                                                <button class="remove-column-btn" onclick="removeColumn('<?php echo $column; ?>')" title="Remove column" style="background:none; border:none; color: #ff6b6b; cursor:pointer;">
+                                                    -
+                                                </button>
+                                                <?php endif; ?>
                                             </div>
                                             <div class="column-resize-handle"></div>
                                         </th>
-                                        <?php 
-                                            endif;
-                                        endforeach; 
-                                        ?>
+                                        <?php endif; endforeach; ?>
                                         <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($paginated_logs as $log): ?>
-                                    <tr class="expandable-log" onclick="toggleLogDetails(this, <?php echo htmlspecialchars(json_encode($log)); ?>)">
+                                    <tr class="expandable-log" onclick='toggleLogDetails(this, <?php echo json_encode($log, JSON_HEX_APOS | JSON_HEX_QUOT); ?>)'>
                                         <?php foreach ($visible_columns as $column): 
                                             if (isset($column_definitions[$column])):
                                                 $field = $column_definitions[$column][1];
                                                 $value = $log[$field] ?? '';
                                         ?>
                                         <td>
-                                            <span title="<?php echo escapeHtml($value); ?>">
+                                            <span title="<?php echo htmlspecialchars($value); ?>">
                                                 <?php 
-                                                if ($column === 'raw_log') {
-                                                    echo escapeHtml(strlen($value) > 100 ? substr($value, 0, 100) . '...' : $value);
-                                                } else {
-                                                    echo escapeHtml(strlen($value) > 50 ? substr($value, 0, 50) . '...' : $value);
-                                                }
+                                                echo htmlspecialchars(strlen($value) > 100 ? substr($value, 0, 100) . '...' : $value);
                                                 ?>
                                             </span>
                                         </td>
-                                        <?php 
-                                            endif;
-                                        endforeach; 
-                                        ?>
+                                        <?php endif; endforeach; ?>
                                         <td>
-                                            <button class="btn" onclick="event.stopPropagation(); toggleLogDetails(this.parentElement.parentElement, <?php echo htmlspecialchars(json_encode($log)); ?>)">Details</button>
+                                            <button class="btn" onclick='event.stopPropagation(); toggleLogDetails(this.parentElement.parentElement, <?php echo json_encode($log, JSON_HEX_APOS | JSON_HEX_QUOT); ?>)'>Details</button>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -517,7 +608,6 @@ if (!empty($filtered_logs)) {
                             </table>
                         </div>
 
-                        <!-- Pagination -->
                         <?php if ($total_pages > 1): ?>
                         <div class="pagination">
                             <div class="page-info">
@@ -544,7 +634,6 @@ if (!empty($filtered_logs)) {
         </main>
     </div>
 
-    <!-- Available Columns Panel -->
     <div class="modal" id="columns-modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -557,9 +646,13 @@ if (!empty($filtered_logs)) {
                     <div class="field-item">
                         <span class="field-item-label"><?php echo $def[0]; ?></span>
                         <div class="field-actions">
+                            <?php if (!in_array($column, $visible_columns)): ?>
                             <button class="add-column-btn" onclick="addColumn('<?php echo $column; ?>')" title="Add column">
-                                <span class="icon-table-add">📊+</span>
+                                <span class="icon-table-add">+</span>
                             </button>
+                            <?php else: ?>
+                            <span style="color: var(--success); font-size: 0.8rem;">✓ Added</span>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -569,12 +662,75 @@ if (!empty($filtered_logs)) {
     </div>
 
     <script>
-        // Initialize timeline chart
         document.addEventListener('DOMContentLoaded', function() {
             initTimelineChart();
             initColumnResize();
             initQueryInput();
+            toggleCustomDateRange(); // Initialize date range visibility
         });
+
+        // ----------------------------------------------------
+        // DATE RANGE TOGGLE
+        // ----------------------------------------------------
+        function toggleCustomDateRange() {
+            const select = document.getElementById('time-filter-select');
+            const rangeContainer = document.getElementById('custom-date-range');
+            if (select.value === 'custom') {
+                rangeContainer.style.display = 'flex';
+            } else {
+                rangeContainer.style.display = 'none';
+            }
+        }
+
+        // ----------------------------------------------------
+        // COLUMN MANAGEMENT JS
+        // ----------------------------------------------------
+        let currentColumns = <?php echo json_encode($visible_columns); ?>;
+        
+        function addColumn(column) {
+            if (!currentColumns.includes(column)) {
+                currentColumns.push(column);
+                updateColumns();
+            }
+        }
+        
+        function removeColumn(column) {
+            const defaultColumns = ['timestamp', 'raw_log'];
+            if (defaultColumns.includes(column)) {
+                alert('Default columns cannot be removed');
+                return;
+            }
+            currentColumns = currentColumns.filter(col => col !== column);
+            updateColumns();
+        }
+        
+        function updateColumns() {
+            document.getElementById('columns-input').value = currentColumns.join(',');
+            const params = new URLSearchParams(window.location.search);
+            params.set('columns', currentColumns.join(','));
+            window.location.href = '?' + params.toString();
+        }
+
+        function showColumnsModal() {
+            document.getElementById('columns-modal').classList.add('active');
+        }
+        
+        function hideColumnsModal() {
+            document.getElementById('columns-modal').classList.remove('active');
+        }
+
+        // Close modals on outside click
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                }
+            });
+        });
+
+        // ----------------------------------------------------
+        // CHART & UTILS
+        // ----------------------------------------------------
 
         function initTimelineChart() {
             const ctx = document.getElementById('timeline-chart').getContext('2d');
@@ -598,45 +754,10 @@ if (!empty($filtered_logs)) {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            },
-                            ticks: {
-                                color: '#9db0d7'
-                            }
-                        },
-                        x: {
-                            grid: {
-                                color: 'rgba(255, 255, 255, 0.1)'
-                            },
-                            ticks: {
-                                color: '#9db0d7',
-                                maxRotation: 45,
-                                minRotation: 45
-                            }
-                        }
+                        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#9db0d7' } },
+                        x: { grid: { color: 'rgba(255, 255, 255, 0.1)' }, ticks: { color: '#9db0d7', maxRotation: 45, minRotation: 45 } }
                     },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(18, 26, 54, 0.95)',
-                            titleColor: '#e8eeff',
-                            bodyColor: '#9db0d7'
-                        }
-                    },
-                    onClick: (e) => {
-                        const points = e.chart.getElementsAtEventForMode(e, 'nearest', { intersect: true }, true);
-                        if (points.length) {
-                            const firstPoint = points[0];
-                            const label = e.chart.data.labels[firstPoint.index];
-                            // You could implement time-based filtering here
-                            console.log('Clicked on hour:', label);
-                        }
-                    }
+                    plugins: { legend: { display: false } }
                 }
             });
         }
@@ -652,40 +773,18 @@ if (!empty($filtered_logs)) {
                 });
             }
         }
-
-        // Column management
-        let currentColumns = <?php echo json_encode($visible_columns); ?>;
-        
-        function addColumn(column) {
-            if (!currentColumns.includes(column)) {
-                currentColumns.push(column);
-                updateColumns();
-            }
-        }
-        
-        function removeColumn(column) {
-            currentColumns = currentColumns.filter(col => col !== column);
-            updateColumns();
-        }
-        
-        function updateColumns() {
-            const params = new URLSearchParams(window.location.search);
-            params.set('columns', currentColumns.join(','));
-            window.location.href = '?' + params.toString();
-        }
         
         function updatePerPage(value) {
             const params = new URLSearchParams(window.location.search);
             params.set('per_page', value);
-            params.set('page', '1'); // Reset to first page
+            params.set('page', '1');
+            params.set('columns', currentColumns.join(','));
             window.location.href = '?' + params.toString();
         }
         
-        // Field group toggling
         function toggleFieldGroup(groupId) {
             const list = document.getElementById(groupId + '-list');
             const icon = list.previousElementSibling.querySelector('.toggle-icon');
-            
             if (list.style.display === 'none') {
                 list.style.display = 'block';
                 icon.textContent = '▲';
@@ -695,86 +794,89 @@ if (!empty($filtered_logs)) {
             }
         }
         
-        // Filter management
+        // ----------------------------------------------------
+        // FILTERING (With URL Encoding Fixes)
+        // ----------------------------------------------------
         function addToFilter(field, value) {
-            const form = document.getElementById('filter-form');
-            const input = form.querySelector(`[name="${field}"]`);
-            if (input) {
-                input.value = value;
-            } else {
-                // Create hidden input if it doesn't exist
-                const hiddenInput = document.createElement('input');
-                hiddenInput.type = 'hidden';
-                hiddenInput.name = field;
-                hiddenInput.value = value;
-                form.appendChild(hiddenInput);
-            }
-            form.submit();
+            const params = new URLSearchParams(window.location.search);
+            params.set(field, value); // URLSearchParams automatically handles encoding
+            
+            // Handle excludes
+            const currentExcludes = params.getAll('exclude[]');
+            const newExcludes = currentExcludes.filter(exclude => {
+                const parts = exclude.split(':');
+                if(parts.length < 2) return true;
+                const [excludeField, ...excludeValParts] = parts;
+                const excludeValue = excludeValParts.join(':');
+                return !(excludeField === field && excludeValue === value);
+            });
+            
+            params.delete('exclude[]');
+            newExcludes.forEach(exclude => params.append('exclude[]', exclude));
+            params.set('columns', currentColumns.join(',')); // Preserve columns
+            
+            window.location.href = '?' + params.toString();
         }
 
         function addExcludeFilter(field, value) {
-            const form = document.getElementById('filter-form');
-            const excludeInput = document.createElement('input');
-            excludeInput.type = 'hidden';
-            excludeInput.name = 'exclude[]';
-            excludeInput.value = field + ':' + value;
-            form.appendChild(excludeInput);
-            form.submit();
+            const params = new URLSearchParams(window.location.search);
+            const currentExcludes = params.getAll('exclude[]');
+            
+            const newExclude = field + ':' + value;
+            if (!currentExcludes.includes(newExclude)) {
+                currentExcludes.push(newExclude);
+            }
+            
+            if (params.has(field) && params.get(field) === value) {
+                params.delete(field);
+            }
+            
+            params.delete('exclude[]');
+            currentExcludes.forEach(exclude => params.append('exclude[]', exclude));
+            params.set('columns', currentColumns.join(',')); // Preserve columns
+            window.location.href = '?' + params.toString();
         }
 
         function removeFilter(field) {
-            const form = document.getElementById('filter-form');
-            const input = form.querySelector(`[name="${field}"]`);
-            if (input) {
-                input.remove();
-            }
-            form.submit();
+            const params = new URLSearchParams(window.location.search);
+            params.delete(field);
+            params.set('columns', currentColumns.join(','));
+            window.location.href = '?' + params.toString();
         }
 
         function removeExcludeFilter(excludeValue) {
-            const form = document.getElementById('filter-form');
-            const excludeInputs = form.querySelectorAll('input[name="exclude[]"]');
+            const params = new URLSearchParams(window.location.search);
+            const currentExcludes = params.getAll('exclude[]');
+            const newExcludes = currentExcludes.filter(exclude => exclude !== excludeValue);
             
-            excludeInputs.forEach(input => {
-                if (input.value === excludeValue) {
-                    input.remove();
-                }
-            });
-            
-            form.submit();
+            params.delete('exclude[]');
+            newExcludes.forEach(exclude => params.append('exclude[]', exclude));
+            params.set('columns', currentColumns.join(','));
+            window.location.href = '?' + params.toString();
         }
         
         function clearFilters() {
-            window.location.href = 'logs.php';
+            window.location.href = 'logs.php?columns=' + currentColumns.join(',');
         }
         
-        function exportLogs() {
-            const params = new URLSearchParams(window.location.search);
-            window.open('export_logs.php?' + params.toString(), '_blank');
-        }
-        
-        // Log details expansion
+        // ----------------------------------------------------
+        // LOG DETAILS EXPANSION
+        // ----------------------------------------------------
         function toggleLogDetails(row, log) {
             const isExpanded = row.classList.contains('expanded-log');
-            
             if (isExpanded) {
-                // Remove details row if it exists
                 const detailsRow = row.nextElementSibling;
                 if (detailsRow && detailsRow.classList.contains('log-details-row')) {
                     detailsRow.remove();
                 }
                 row.classList.remove('expanded-log');
             } else {
-                // Remove any existing expanded rows
                 document.querySelectorAll('.expanded-log').forEach(r => {
                     r.classList.remove('expanded-log');
                     const next = r.nextElementSibling;
-                    if (next && next.classList.contains('log-details-row')) {
-                        next.remove();
-                    }
+                    if (next && next.classList.contains('log-details-row')) next.remove();
                 });
                 
-                // Add details row
                 const detailsRow = document.createElement('tr');
                 detailsRow.className = 'log-details-row';
                 detailsRow.innerHTML = `
@@ -793,42 +895,39 @@ if (!empty($filtered_logs)) {
         }
         
         function generateLogDetails(log) {
-            // Show raw log at the top
-            let details = `
-                <div class="log-detail-field">
-                    <span class="log-detail-field-name">Raw Log</span>
-                    <span class="log-detail-field-value" style="font-family: monospace; white-space: pre-wrap; background: #0b122b; padding: 0.5rem; border-radius: 0.25rem; display: block;">${escapeHtml(log.raw_log || 'No raw log data')}</span>
-                    <div class="log-detail-field-actions">
-                        <button class="add-filter-btn" onclick="event.stopPropagation(); addToFilter('asset', '${escapeHtml(log.asset)}')" title="Filter by asset">
-                            <span class="icon-filter-add">+</span>
-                        </button>
-                        <button class="add-column-btn" onclick="event.stopPropagation(); addColumn('raw_log')" title="Add raw log column">
-                            <span class="icon-table-add">📊+</span>
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            // Add all other fields dynamically
+            let details = '';
             Object.keys(log).forEach(key => {
-                if (!['raw_log', '_source_file'].includes(key) && log[key]) {
+                if (!['_source_file'].includes(key) && log[key] !== null && log[key] !== '' && log[key] !== undefined) {
+                    const value = String(log[key]);
+                    
+                    // We must use strict encoding for values passed to JS functions to prevent syntax errors
+                    const safeValue = encodeURIComponent(value);
+                    const displayValue = escapeHtml(value);
+                    
                     details += `
                         <div class="log-detail-field">
-                            <span class="log-detail-field-name">${ucfirst(key.replace(/_/g, ' '))}</span>
-                            <span class="log-detail-field-value">${escapeHtml(log[key])}</span>
-                            <div class="log-detail-field-actions">
-                                <button class="add-filter-btn" onclick="event.stopPropagation(); addToFilter('${key}', '${escapeHtml(log[key])}')">
-                                    <span class="icon-filter-add">+</span>
-                                </button>
-                                <button class="add-column-btn" onclick="event.stopPropagation(); addColumn('${key}')">
-                                    <span class="icon-table-add">📊+</span>
-                                </button>
+                            <div class="log-detail-field-content">
+                                <div class="log-detail-field-left">
+                                    <span class="log-detail-field-name">${ucfirst(key.replace(/_/g, ' '))}</span>
+                                    <button class="add-column-btn" onclick="event.stopPropagation(); addColumn('${key}')" title="Add to table" style="background:none; border:none; cursor:pointer; color: #66d9ef;">
+                                        +
+                                    </button>
+                                </div>
+                                <span class="log-detail-field-separator">:</span>
+                                <div class="log-detail-field-middle">
+                                    <div class="field-with-actions">
+                                        <span class="field-value">${displayValue}</span>
+                                        <div class="field-hover-actions">
+                                            <button class="add-filter-btn" onclick="event.stopPropagation(); addToFilter('${key}', decodeURIComponent('${safeValue}'))" title="Filter by this value">+</button>
+                                            <button class="exclude-filter-btn" onclick="event.stopPropagation(); addExcludeFilter('${key}', decodeURIComponent('${safeValue}'))" title="Exclude this value">-</button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
                 }
             });
-            
             return details;
         }
         
@@ -845,53 +944,30 @@ if (!empty($filtered_logs)) {
                 .replace(/'/g, "&#039;");
         }
         
-        function showColumnsModal() {
-            document.getElementById('columns-modal').classList.add('active');
-        }
-        
-        function hideColumnsModal() {
-            document.getElementById('columns-modal').classList.remove('active');
-        }
-        
-        // Column resizing
         function initColumnResize() {
             const resizeHandles = document.querySelectorAll('.column-resize-handle');
-            
             resizeHandles.forEach(handle => {
                 handle.addEventListener('mousedown', function(e) {
                     e.preventDefault();
                     const column = this.parentElement;
                     const startX = e.pageX;
                     const startWidth = column.offsetWidth;
-                    
                     function onMouseMove(e) {
                         const newWidth = startWidth + (e.pageX - startX);
-                        if (newWidth > 50) { // Minimum width
+                        if (newWidth > 50) {
                             column.style.minWidth = newWidth + 'px';
                             column.style.width = newWidth + 'px';
                         }
                     }
-                    
                     function onMouseUp() {
                         document.removeEventListener('mousemove', onMouseMove);
                         document.removeEventListener('mouseup', onMouseUp);
                     }
-                    
                     document.addEventListener('mousemove', onMouseMove);
                     document.addEventListener('mouseup', onMouseUp);
                 });
             });
         }
-
-        // Close modals on outside click
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', function(e) {
-                if (e.target === this) {
-                    this.classList.remove('active');
-                }
-            });
-        });
     </script>
 </body>
-
 </html>
