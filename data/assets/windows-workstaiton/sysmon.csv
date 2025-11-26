@@ -1,17 +1,7 @@
-timestamp,event_id,user,computer,process_name,process_id,image,command_line,parent_process
-timestamp,event_id,user,computer,process_name,process_id,image,command_line,parent_process
-"2025-11-16 17:08:48",1,"DOMAIN\jdoe",WS-001,explorer.exe,1000,"C:\Windows\explorer.exe",explorer.exe,services.exe
-"2025-11-16 17:38:48",3,SYSTEM,WS-001,svchost.exe,1001,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
-"2025-11-16 18:08:48",5,"WS-001\user1",WS-001,chrome.exe,1002,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
-"2025-11-16 18:38:48",7,"DOMAIN\jdoe",WS-001,powershell.exe,1003,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
-"2025-11-16 19:08:48",10,SYSTEM,WS-001,explorer.exe,1004,"C:\Windows\explorer.exe",explorer.exe,services.exe
-"2025-11-16 19:38:48",11,"WS-001\user1",WS-001,svchost.exe,1005,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
-"2025-11-16 20:08:48",1,"DOMAIN\jdoe",WS-001,chrome.exe,1006,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
-"2025-11-16 20:38:48",3,SYSTEM,WS-001,powershell.exe,1007,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
-"2025-11-16 21:08:48",5,"WS-001\user1",WS-001,explorer.exe,1008,"C:\Windows\explorer.exe",explorer.exe,services.exe
-"2025-11-16 21:38:48",7,"DOMAIN\jdoe",WS-001,svchost.exe,1009,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
-"2025-11-16 22:08:48",10,SYSTEM,WS-001,chrome.exe,1010,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
-"2025-11-16 22:38:48",11,"WS-001\user1",WS-001,powershell.exe,1011,"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe","powershell.exe -Command Get-Process",explorer.exe
-"2025-11-16 23:08:48",1,"DOMAIN\jdoe",WS-001,explorer.exe,1012,"C:\Windows\explorer.exe",explorer.exe,services.exe
-"2025-11-16 23:38:48",3,SYSTEM,WS-001,svchost.exe,1013,"C:\Windows\System32\svchost.exe","svchost.exe -k netsvcs",services.exe
-"2025-11-17 00:08:48",5,"WS-001\user1",WS-001,chrome.exe,1014,"C:\Program Files\Google\Chrome\Application\chrome.exe","chrome.exe --type=renderer",explorer.exe
+timestamp,event_id,image,command_line,parent_image,parent_command_line,process_guid,logon_guid,user,integrity_level,hashes,destination_ip,destination_port,protocol,source_ip,source_port,target_filename,creation_utc_time,target_object,details,image_loaded,source_process,target_process,source_process_guid,target_process_guid,call_trace
+2025-11-16 17:08:48,1,C:\\Windows\\explorer.exe,explorer.exe,services.exe,services.exe,{GUID-1001},{LOGON-2001},DOMAIN\\jdoe,Medium,SHA256=aa11bb22cc33, , , , , , , , , , , , , ,
+2025-11-16 17:15:10,3,C:\\Windows\\System32\\svchost.exe,svchost.exe -k netsvcs,services.exe,services.exe,{GUID-1002},{LOGON-2001},SYSTEM,High, ,8.8.8.8,53,udp,192.168.1.45,51762, , , , , , , , ,
+2025-11-16 17:38:48,10,, , , ,{GUID-1003},{LOGON-2001},DOMAIN\\jdoe,Medium, , , , , , , , , , ,lsass.exe,explorer.exe,{GUID-3001},{GUID-4001},C:\\Windows\\SYSTEM32\\ntdll.dll+C6D7
+2025-11-16 17:55:48,11,C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe,chrome.exe --type=renderer,explorer.exe,explorer.exe,{GUID-1004},{LOGON-2002},WS-001\\user1,Low,SHA256=dd44ee55ff66, , , , , ,C:\\Users\\user1\\AppData\\Local\\Temp\\file1.tmp,2025-11-16T17:55:48Z, , , , , , ,
+2025-11-16 18:08:48,13,C:\\Windows\\System32\\reg.exe,reg.exe add HKCU\\Software\\Run /v updater /d C:\\temp\\runme.exe,services.exe,services.exe,{GUID-1005},{LOGON-2003},DOMAIN\\asmith,Medium, , , , , , , , ,HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\updater,String: C:\\temp\\runme.exe, , , , ,
+2025-11-16 18:21:48,7,C:\\Windows\\System32\\svchost.exe,svchost.exe -k netsvcs,services.exe,services.exe,{GUID-1006},{LOGON-2004},SYSTEM,High,SHA256=1122334455667788, , , , , , , , , ,C:\\Windows\\System32\\kernel32.dll, , , , ,
