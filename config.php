@@ -1,21 +1,10 @@
 <?php
-// Hardened session configuration
-ini_set('session.use_strict_mode', 1);
-ini_set('session.cookie_httponly', 1);
-ini_set('session.cookie_samesite', 'Lax');
-
-session_start([
-    'cookie_httponly' => true,
-    'cookie_secure' => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on',
-    'use_strict_mode' => true,
-]);
+session_start();
 
 // Security headers
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
-header("Referrer-Policy: no-referrer");
-header("Content-Security-Policy: default-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'self' https://cdn.jsdelivr.net");
 
 // Database configuration for user storage
 define('USERS_CSV', __DIR__ . '/data/users.csv');
@@ -33,21 +22,6 @@ function checkAuth() {
         header('Location: index.php');
         exit();
     }
-}
-
-// Input helpers
-function getParam($key, $method = INPUT_GET, $default = '') {
-    $value = filter_input($method, $key, FILTER_SANITIZE_FULL_SPECIAL_CHARS);
-    return $value === null ? $default : $value;
-}
-
-function sanitizeArray($values) {
-    if (!is_array($values)) {
-        return [];
-    }
-    return array_map(function($value) {
-        return is_string($value) ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8') : $value;
-    }, $values);
 }
 
 // Secure CSV file operations - UPDATED FOR USER HANDLING
@@ -115,16 +89,12 @@ function writeCSV($filename, $data) {
     if ($file) {
         // Write header from first row keys
         $header = array_keys($data[0]);
-        // Drop accidental inline header rows
-        if ($data && array_values($data[0]) === $header) {
-            array_shift($data);
-        }
         // Remove internal fields from header
         $header = array_filter($header, function($key) {
             return !in_array($key, ['_source_file']);
         });
         fputcsv($file, $header);
-
+        
         foreach ($data as $row) {
             // Remove internal fields before writing
             $write_row = [];
@@ -137,18 +107,6 @@ function writeCSV($filename, $data) {
         return true;
     }
     return false;
-}
-
-// CSRF protection
-function getCsrfToken() {
-    if (empty($_SESSION['csrf_token'])) {
-        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
-    }
-    return $_SESSION['csrf_token'];
-}
-
-function validateCsrfToken($token) {
-    return !empty($token) && hash_equals($_SESSION['csrf_token'] ?? '', $token);
 }
 
 // Utility functions
@@ -190,28 +148,29 @@ function getAllLogFiles() {
     return $logFiles;
 }
 
-// Read all logs from the new structure and normalize them for UI/analytics
+// Read all logs from the new structure
 function readAllLogs() {
     $allLogs = [];
     $logFiles = getAllLogFiles();
-
+    
     foreach ($logFiles as $fileInfo) {
         $logs = readCSV($fileInfo['path']);
         foreach ($logs as $log) {
+            // Add source information
             $log['asset'] = $fileInfo['asset'];
             $log['log_type'] = $fileInfo['log_type'];
-            $log = enrichLog($log);
             $log['raw_log'] = generateRawLogString($log);
             $allLogs[] = $log;
         }
     }
-
+    
+    // Sort by timestamp
     usort($allLogs, function($a, $b) {
         $timeA = strtotime($a['timestamp'] ?? '');
         $timeB = strtotime($b['timestamp'] ?? '');
         return $timeB - $timeA;
     });
-
+    
     return $allLogs;
 }
 
@@ -224,139 +183,6 @@ function generateRawLogString($log) {
         }
     }
     return rtrim($raw, ' | ');
-}
-
-// Normalize logs to expose consistent SIEM fields
-function enrichLog($log) {
-    $log['event_id'] = $log['event_id'] ?? ($log['signature_id'] ?? ($log['rule_id'] ?? 'N/A'));
-    $log['severity'] = normalizeSeverity($log);
-    $log['event_category'] = normalizeCategory($log);
-    $log['event_summary'] = buildSummary($log);
-    $log['source'] = $log['asset'] . ' / ' . ($log['log_type'] ?? '');
-    $log['normalized_time'] = $log['timestamp'] ?? '';
-    return $log;
-}
-
-function normalizeSeverity($log) {
-    $logType = $log['log_type'] ?? '';
-    $eventId = (string)($log['event_id'] ?? '');
-
-    $severityMaps = [
-        'security' => [
-            '4625' => 'high',
-            '4672' => 'high',
-            '4732' => 'medium',
-            '4648' => 'medium',
-            '4624' => 'low',
-        ],
-        'sysmon' => [
-            '1' => 'medium',
-            '3' => 'medium',
-            '7' => 'high',
-            '10' => 'high',
-            '11' => 'medium',
-        ],
-        'powershell' => [
-            '400' => 'medium',
-            '403' => 'critical',
-            '600' => 'low',
-            '800' => 'medium',
-        ],
-    ];
-
-    if (isset($severityMaps[$logType][$eventId])) {
-        return $severityMaps[$logType][$eventId];
-    }
-
-    if (isset($log['alert_severity'])) {
-        return intval($log['alert_severity']) >= 3 ? 'high' : (intval($log['alert_severity']) >= 2 ? 'medium' : 'low');
-    }
-
-    if (isset($log['action']) && in_array(strtoupper($log['action']), ['DROP', 'REJECT'])) {
-        return 'high';
-    }
-
-    return $log['severity'] ?? 'info';
-}
-
-function normalizeCategory($log) {
-    $logType = $log['log_type'] ?? '';
-    $eventId = (string)($log['event_id'] ?? '');
-
-    $map = [
-        'security' => [
-            '4624' => 'Authentication Success',
-            '4625' => 'Authentication Failure',
-            '4672' => 'Privilege Assignment',
-            '4732' => 'Group Modification',
-            '4648' => 'Explicit Credentials',
-        ],
-        'sysmon' => [
-            '1' => 'Process Creation',
-            '3' => 'Network Connection',
-            '5' => 'Process Termination',
-            '7' => 'Image Loaded',
-            '10' => 'Process Access',
-            '11' => 'File Created',
-        ],
-        'powershell' => [
-            '400' => 'Engine Lifecycle',
-            '403' => 'Blocked Script',
-            '600' => 'Provider Lifecycle',
-            '800' => 'Pipeline Execution',
-        ],
-    ];
-
-    return $map[$logType][$eventId] ?? ucfirst(str_replace('_', ' ', $logType));
-}
-
-function buildSummary($log) {
-    if (!empty($log['message'])) {
-        return $log['message'];
-    }
-
-    if (($log['log_type'] ?? '') === 'security') {
-        return sprintf('User %s %s from %s (Logon type %s)',
-            $log['user'] ?? 'unknown',
-            strtolower($log['result'] ?? 'activity'),
-            $log['source_address'] ?? 'N/A',
-            $log['logon_type'] ?? 'N/A'
-        );
-    }
-
-    if (($log['log_type'] ?? '') === 'sysmon') {
-        return sprintf('%s (%s) executed with PID %s',
-            $log['process_name'] ?? 'process',
-            $log['image'] ?? 'unknown image',
-            $log['process_id'] ?? 'N/A'
-        );
-    }
-
-    if (($log['log_type'] ?? '') === 'firewall') {
-        return sprintf('%s %s:%s -> %s:%s via %s',
-            strtoupper($log['action'] ?? 'action'),
-            $log['src_ip'] ?? '-',
-            $log['src_port'] ?? '-',
-            $log['dest_ip'] ?? '-',
-            $log['dest_port'] ?? '-',
-            $log['protocol'] ?? ''
-        );
-    }
-
-    if (($log['log_type'] ?? '') === 'iis') {
-        return sprintf('%s %s%s returned %s',
-            $log['method'] ?? 'REQ',
-            $log['uri_stem'] ?? '/',
-            !empty($log['uri_query']) ? '?' . $log['uri_query'] : '',
-            $log['status'] ?? ''
-        );
-    }
-
-    if (isset($log['alert_message'])) {
-        return $log['alert_message'];
-    }
-
-    return $log['raw_log'] ?? 'Activity recorded';
 }
 
 // Create the asset directory structure
@@ -384,7 +210,7 @@ function createAssetDirectoryStructure() {
     }
 }
 
-// Generate sample log data for each log type
+// Generate sample log data for each log type - UPDATED WITH REALISTIC FIELDS
 function generateSampleLogData($asset, $logType) {
     $data = [];
     
@@ -414,80 +240,151 @@ function generateSampleLogData($asset, $logType) {
     }
 }
 
-// Sample data generators
+// Sample data generators - UPDATED WITH EVENT-SPECIFIC FIELDS
 function generateWindowsWorkstationLogs($logType) {
     $data = [];
     $baseTime = time() - 86400; // Start from 24 hours ago
     
     switch ($logType) {
         case 'powershell':
-            $headers = ['timestamp', 'event_id', 'user', 'computer', 'script_name', 'command_line', 'result'];
+            // PowerShell logs with different fields based on event type
+            $headers = ['timestamp', 'event_id', 'event_type', 'user', 'computer', 'script_name', 'command_line', 'result', 'script_block_id', 'total_blocks', 'path'];
             $data[] = array_combine($headers, $headers);
             
-            for ($i = 0; $i < 15; $i++) {
-                $time = date('Y-m-d H:i:s', $baseTime + ($i * 3600));
+            $eventTypes = [
+                [400, 'ScriptBlock', 'Get-Process.ps1', 'Get-Process -Name explorer', 'Success', 'SB_001', 1, 'C:\\Scripts\\Get-Process.ps1'],
+                [403, 'ScriptBlock', 'ScriptBlock', 'Invoke-WebRequest http://external.com/file.exe', 'Blocked', 'SB_002', 1, ''],
+                [600, 'Provider', 'NULL', 'Set-ExecutionPolicy Unrestricted', 'Success', '', 0, ''],
+                [800, 'Pipeline', 'Start-Process.ps1', 'Start-Process notepad.exe', 'Failure', '', 0, 'C:\\Scripts\\Start-Process.ps1'],
+                [4104, 'Execute', 'RemoteCommand', 'Invoke-Command -ComputerName SERVER01 {Get-Service}', 'Success', '', 0, '']
+            ];
+            
+            for ($i = 0; $i < 20; $i++) {
+                $event = $eventTypes[$i % count($eventTypes)];
+                $time = date('Y-m-d H:i:s', $baseTime + ($i * 1800));
                 $data[] = [
                     'timestamp' => $time,
-                    'event_id' => [400, 403, 600, 800][$i % 4],
+                    'event_id' => $event[0],
+                    'event_type' => $event[1],
                     'user' => ['DOMAIN\\jdoe', 'DOMAIN\\asmith', 'WS-001\\admin'][$i % 3],
                     'computer' => 'WS-001',
-                    'script_name' => ['Get-Process.ps1', 'ScriptBlock', 'NULL', 'Start-Process.ps1'][$i % 4],
-                    'command_line' => [
-                        'Get-Process -Name explorer',
-                        'Invoke-WebRequest http://external.com/file.exe',
-                        'Set-ExecutionPolicy Unrestricted',
-                        'Start-Process notepad.exe'
-                    ][$i % 4],
-                    'result' => ['Success', 'Blocked', 'Success', 'Failure'][$i % 4]
+                    'script_name' => $event[2],
+                    'command_line' => $event[3],
+                    'result' => $event[4],
+                    'script_block_id' => $event[5],
+                    'total_blocks' => $event[6],
+                    'path' => $event[7]
                 ];
             }
             break;
             
         case 'sysmon':
-            $headers = ['timestamp', 'event_id', 'user', 'computer', 'process_name', 'process_id', 'image', 'command_line', 'parent_process'];
+            // Sysmon logs with event-specific fields
+            $headers = ['timestamp', 'event_id', 'user', 'computer', 'process_name', 'process_id', 'image', 'command_line', 'parent_process', 'parent_command_line', 'logon_guid', 'hash', 'target_filename', 'destination_ip', 'destination_port'];
             $data[] = array_combine($headers, $headers);
             
-            for ($i = 0; $i < 15; $i++) {
-                $time = date('Y-m-d H:i:s', $baseTime + ($i * 1800));
-                $data[] = [
+            for ($i = 0; $i < 25; $i++) {
+                $time = date('Y-m-d H:i:s', $baseTime + ($i * 1200));
+                $eventId = [1, 3, 5, 7, 10, 11, 13][$i % 7];
+                
+                $baseLog = [
                     'timestamp' => $time,
-                    'event_id' => [1, 3, 5, 7, 10, 11][$i % 6],
+                    'event_id' => $eventId,
                     'user' => ['DOMAIN\\jdoe', 'SYSTEM', 'WS-001\\user1'][$i % 3],
                     'computer' => 'WS-001',
-                    'process_name' => ['explorer.exe', 'svchost.exe', 'chrome.exe', 'powershell.exe'][$i % 4],
+                    'process_name' => ['explorer.exe', 'svchost.exe', 'chrome.exe', 'powershell.exe', 'notepad.exe'][$i % 5],
                     'process_id' => 1000 + $i,
                     'image' => [
                         'C:\\Windows\\explorer.exe',
                         'C:\\Windows\\System32\\svchost.exe',
                         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
-                    ][$i % 4],
-                    'command_line' => [
-                        'explorer.exe',
-                        'svchost.exe -k netsvcs',
-                        'chrome.exe --type=renderer',
-                        'powershell.exe -Command Get-Process'
-                    ][$i % 4],
-                    'parent_process' => ['services.exe', 'services.exe', 'explorer.exe', 'explorer.exe'][$i % 4]
+                        'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+                        'C:\\Windows\\System32\\notepad.exe'
+                    ][$i % 5],
                 ];
+                
+                // Add event-specific fields
+                switch ($eventId) {
+                    case 1: // Process creation
+                        $baseLog['command_line'] = [
+                            'explorer.exe',
+                            'svchost.exe -k netsvcs',
+                            'chrome.exe --type=renderer',
+                            'powershell.exe -Command Get-Process',
+                            'notepad.exe C:\\temp\\file.txt'
+                        ][$i % 5];
+                        $baseLog['parent_process'] = ['services.exe', 'services.exe', 'explorer.exe', 'explorer.exe', 'explorer.exe'][$i % 5];
+                        $baseLog['parent_command_line'] = 'userinit.exe';
+                        $baseLog['logon_guid'] = '{' . substr(md5($i), 0, 8) . '-' . substr(md5($i), 8, 4) . '-' . substr(md5($i), 12, 4) . '-' . substr(md5($i), 16, 4) . '-' . substr(md5($i), 20, 12) . '}';
+                        $baseLog['hash'] = 'SHA256=' . substr(hash('sha256', $i . 'process'), 0, 64);
+                        break;
+                        
+                    case 3: // Network connection
+                        $baseLog['destination_ip'] = ['8.8.8.8', '192.168.1.10', '10.1.1.100', '172.16.1.50'][$i % 4];
+                        $baseLog['destination_port'] = [80, 443, 53, 3389][$i % 4];
+                        $baseLog['command_line'] = $baseLog['image'];
+                        break;
+                        
+                    case 5: // Process terminated
+                        $baseLog['command_line'] = $baseLog['image'];
+                        break;
+                        
+                    case 7: // Image loaded
+                        $baseLog['image_loaded'] = ['kernel32.dll', 'user32.dll', 'ntdll.dll', 'advapi32.dll'][$i % 4];
+                        break;
+                        
+                    case 10: // Process accessed
+                        $baseLog['call_trace'] = 'C:\\Windows\\SYSTEM32\\ntdll.dll+C6D7';
+                        $baseLog['source_process'] = 'lsass.exe';
+                        break;
+                        
+                    case 11: // File created
+                        $baseLog['target_filename'] = ['C:\\temp\\file' . $i . '.txt', 'C:\\Users\\Public\\doc' . $i . '.doc', 'C:\\Windows\\Temp\\tmp' . $i . '.tmp'][$i % 3];
+                        break;
+                        
+                    case 13: // Registry value set
+                        $baseLog['target_object'] = ['HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\App' . $i, 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\Startup' . $i][$i % 2];
+                        $baseLog['details'] = 'String: C:\\Program Files\\App' . $i . '\\app.exe';
+                        break;
+                }
+                
+                $data[] = $baseLog;
             }
             break;
             
         case 'security':
-            $headers = ['timestamp', 'event_id', 'log_name', 'user', 'computer', 'source_address', 'logon_type', 'result'];
+            // Security logs with different Event IDs and their specific fields
+            $headers = ['timestamp', 'event_id', 'log_name', 'user', 'computer', 'source_address', 'logon_type', 'result', 'logon_process', 'auth_package', 'target_user', 'target_domain', 'session_id', 'process_name'];
             $data[] = array_combine($headers, $headers);
             
-            for ($i = 0; $i < 15; $i++) {
-                $time = date('Y-m-d H:i:s', $baseTime + ($i * 1200));
+            $securityEvents = [
+                [4624, 'Success', 2, 'User32', 'Negotiate', '', '', rand(1000, 9999), 'explorer.exe'], // Logon
+                [4625, 'Failure', 3, 'NtLmSsp', 'NTLM', '', '', 0, ''], // Failed logon
+                [4672, 'Success', 2, 'Advapi', 'Negotiate', 'SYSTEM', 'NT AUTHORITY', rand(1000, 9999), 'services.exe'], // Special privileges
+                [4648, 'Success', 5, 'Advapi', 'Negotiate', '', '', rand(1000, 9999), 'cmd.exe'], // Explicit credentials
+                [4732, 'Success', 0, 'SAM', '', 'Backup Operators', 'BUILTIN', 0, ''], // Group membership
+                [4720, 'Success', 0, 'SAM', '', 'jdoe', 'DOMAIN', 0, ''], // User account created
+                [4738, 'Success', 0, 'SAM', '', 'WS-001$', 'DOMAIN', 0, ''] // User account changed
+            ];
+            
+            for ($i = 0; $i < 20; $i++) {
+                $event = $securityEvents[$i % count($securityEvents)];
+                $time = date('Y-m-d H:i:s', $baseTime + ($i * 1500));
                 $data[] = [
                     'timestamp' => $time,
-                    'event_id' => [4624, 4625, 4672, 4648, 4732][$i % 5],
+                    'event_id' => $event[0],
                     'log_name' => 'Security',
-                    'user' => ['DOMAIN\\jdoe', 'Unknown', 'DOMAIN\\admin', 'SYSTEM'][$i % 4],
+                    'user' => ['DOMAIN\\jdoe', 'Unknown', 'DOMAIN\\admin', 'SYSTEM', 'WS-001$'][$i % 5],
                     'computer' => 'WS-001',
-                    'source_address' => ['192.168.1.45', '10.1.1.100', '192.168.1.45', '::1'][$i % 4],
-                    'logon_type' => [2, 3, 2, 5, 10][$i % 5],
-                    'result' => ['Success', 'Failure', 'Success', 'Success', 'Failure'][$i % 5]
+                    'source_address' => ['192.168.1.45', '10.1.1.100', '192.168.1.45', '::1', 'fe80::1234'][$i % 5],
+                    'logon_type' => $event[2],
+                    'result' => $event[1],
+                    'logon_process' => $event[3],
+                    'auth_package' => $event[4],
+                    'target_user' => $event[5],
+                    'target_domain' => $event[6],
+                    'session_id' => $event[7],
+                    'process_name' => $event[8]
                 ];
             }
             break;
@@ -502,7 +399,7 @@ function generateWindowsWebServerLogs($logType) {
     
     switch ($logType) {
         case 'iis':
-            $headers = ['timestamp', 'server_ip', 'method', 'uri_stem', 'uri_query', 'port', 'username', 'client_ip', 'user_agent', 'status', 'substatus', 'win32_status'];
+            $headers = ['timestamp', 'server_ip', 'method', 'uri_stem', 'uri_query', 'port', 'username', 'client_ip', 'user_agent', 'status', 'substatus', 'win32_status', 'bytes_sent', 'bytes_received', 'time_taken'];
             $data[] = array_combine($headers, $headers);
             
             for ($i = 0; $i < 15; $i++) {
@@ -510,21 +407,25 @@ function generateWindowsWebServerLogs($logType) {
                 $data[] = [
                     'timestamp' => $time,
                     'server_ip' => '192.168.1.10',
-                    'method' => ['GET', 'POST', 'PUT', 'DELETE'][$i % 4],
-                    'uri_stem' => ['/login.aspx', '/api/users', '/images/logo.png', '/admin/config'][$i % 4],
-                    'uri_query' => ['', 'user=admin&pass=test', 'id=123', 'action=delete'][$i % 4],
-                    'port' => 80,
-                    'username' => ['-', 'admin', 'user1', '-'][$i % 4],
-                    'client_ip' => ['203.0.113.45', '198.51.100.23', '192.168.1.150', '203.0.113.67'][$i % 4],
+                    'method' => ['GET', 'POST', 'PUT', 'DELETE', 'HEAD'][$i % 5],
+                    'uri_stem' => ['/login.aspx', '/api/users', '/images/logo.png', '/admin/config', '/api/data'][$i % 5],
+                    'uri_query' => ['', 'user=admin&pass=test', 'id=123', 'action=delete', 'search=test'][$i % 5],
+                    'port' => [80, 443][$i % 2],
+                    'username' => ['-', 'admin', 'user1', '-', 'api_user'][$i % 5],
+                    'client_ip' => ['203.0.113.45', '198.51.100.23', '192.168.1.150', '203.0.113.67', '10.1.2.100'][$i % 5],
                     'user_agent' => [
                         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                         'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
                         'curl/7.68.0',
-                        'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0)'
-                    ][$i % 4],
-                    'status' => [200, 401, 404, 500, 301][$i % 5],
-                    'substatus' => [0, 2, 0, 0, 0][$i % 5],
-                    'win32_status' => [0, 5, 2, 1, 0][$i % 5]
+                        'Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; rv:11.0)',
+                        'PostmanRuntime/7.26.0'
+                    ][$i % 5],
+                    'status' => [200, 401, 404, 500, 301, 304][$i % 6],
+                    'substatus' => [0, 2, 0, 0, 0, 0][$i % 6],
+                    'win32_status' => [0, 5, 2, 1, 0, 0][$i % 6],
+                    'bytes_sent' => [512, 1024, 2048, 512, 4096][$i % 5],
+                    'bytes_received' => [0, 256, 512, 0, 1024][$i % 5],
+                    'time_taken' => [12, 45, 8, 120, 23][$i % 5]
                 ];
             }
             break;
@@ -544,7 +445,7 @@ function generateLinuxAppServerLogs($logType) {
     
     switch ($logType) {
         case 'audit':
-            $headers = ['timestamp', 'type', 'pid', 'uid', 'auid', 'ses', 'subj', 'op', 'success', 'exe', 'hostname', 'addr', 'terminal', 'res'];
+            $headers = ['timestamp', 'type', 'pid', 'uid', 'auid', 'ses', 'subj', 'op', 'success', 'exe', 'hostname', 'addr', 'terminal', 'res', 'key', 'comm', 'path'];
             $data[] = array_combine($headers, $headers);
             
             for ($i = 0; $i < 15; $i++) {
@@ -559,54 +460,63 @@ function generateLinuxAppServerLogs($logType) {
                     'subj' => 'unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023',
                     'op' => ['login', 'openat', 'execve', 'mkdir', 'connect'][$i % 5],
                     'success' => ['yes', 'no'][$i % 2],
-                    'exe' => ['/usr/sbin/sshd', '/usr/bin/vim', '/bin/mkdir', '/usr/bin/curl'][$i % 4],
+                    'exe' => ['/usr/sbin/sshd', '/usr/bin/vim', '/bin/mkdir', '/usr/bin/curl', '/bin/bash'][$i % 5],
                     'hostname' => 'linux-srv01',
-                    'addr' => ['192.168.1.45', NULL, '10.1.1.100'][$i % 3],
-                    'terminal' => ['pts/0', 'pts/1', 'tty1'][$i % 3],
-                    'res' => ['success', 'failed', 'denied'][$i % 3]
+                    'addr' => ['192.168.1.45', NULL, '10.1.1.100', '192.168.1.100'][$i % 4],
+                    'terminal' => ['pts/0', 'pts/1', 'tty1', 'ssh'][$i % 4],
+                    'res' => ['success', 'failed', 'denied'][$i % 3],
+                    'key' => ['sshd', 'file-access', 'user-cmd'][$i % 3],
+                    'comm' => ['sshd', 'vim', 'mkdir', 'curl', 'bash'][$i % 5],
+                    'path' => ['/etc/passwd', '/home/user/file.txt', '/tmp/tempfile', '/var/log/auth.log'][$i % 4]
                 ];
             }
             break;
             
         case 'cron':
-            $headers = ['timestamp', 'user', 'command', 'pid', 'hostname'];
+            $headers = ['timestamp', 'user', 'command', 'pid', 'hostname', 'cron_job'];
             $data[] = array_combine($headers, $headers);
             
             for ($i = 0; $i < 15; $i++) {
                 $time = date('Y-m-d H:i:s', $baseTime + ($i * 3600));
                 $data[] = [
                     'timestamp' => $time,
-                    'user' => ['root', 'www-data', 'backup'][$i % 3],
+                    'user' => ['root', 'www-data', 'backup', 'mysql'][$i % 4],
                     'command' => [
                         '/usr/lib/php/sessionclean',
                         '/opt/backup/run-backup.sh',
                         '/usr/bin/php /var/www/html/cron.php',
-                        '/usr/bin/updatedb'
-                    ][$i % 4],
+                        '/usr/bin/updatedb',
+                        '/usr/sbin/logrotate'
+                    ][$i % 5],
                     'pid' => 500 + $i,
-                    'hostname' => 'linux-srv01'
+                    'hostname' => 'linux-srv01',
+                    'cron_job' => ['session-clean', 'nightly-backup', 'app-cron', 'updatedb', 'log-rotate'][$i % 5]
                 ];
             }
             break;
             
         case 'application':
-            $headers = ['timestamp', 'level', 'component', 'message', 'pid', 'hostname'];
+            $headers = ['timestamp', 'level', 'component', 'message', 'pid', 'hostname', 'thread', 'logger', 'exception'];
             $data[] = array_combine($headers, $headers);
             
             for ($i = 0; $i < 15; $i++) {
                 $time = date('Y-m-d H:i:s', $baseTime + ($i * 800));
                 $data[] = [
                     'timestamp' => $time,
-                    'level' => ['INFO', 'WARNING', 'ERROR', 'DEBUG'][$i % 4],
-                    'component' => ['webapp', 'database', 'auth', 'api'][$i % 4],
+                    'level' => ['INFO', 'WARNING', 'ERROR', 'DEBUG', 'CRITICAL'][$i % 5],
+                    'component' => ['webapp', 'database', 'auth', 'api', 'cache'][$i % 5],
                     'message' => [
                         'User login successful',
                         'Database connection timeout',
                         'Failed authentication attempt',
-                        'API rate limit exceeded'
-                    ][$i % 4],
+                        'API rate limit exceeded',
+                        'Cache initialization failed'
+                    ][$i % 5],
                     'pid' => 800 + $i,
-                    'hostname' => 'linux-srv01'
+                    'hostname' => 'linux-srv01',
+                    'thread' => ['main', 'worker-1', 'worker-2', 'scheduler'][$i % 4],
+                    'logger' => ['com.app.web.Auth', 'com.app.db.Connection', 'com.app.api.Controller', 'com.app.cache.Manager'][$i % 4],
+                    'exception' => ['', 'SQLException: Connection refused', 'AuthException: Invalid credentials', '', 'CacheException: Out of memory'][$i % 5]
                 ];
             }
             break;
@@ -621,19 +531,22 @@ function generateDomainControllerLogs($logType) {
     
     switch ($logType) {
         case 'dns':
-            $headers = ['timestamp', 'client_ip', 'query_name', 'query_type', 'response_code', 'server', 'zone'];
+            $headers = ['timestamp', 'client_ip', 'query_name', 'query_type', 'response_code', 'server', 'zone', 'record_type', 'record_data', 'ttl'];
             $data[] = array_combine($headers, $headers);
             
             for ($i = 0; $i < 15; $i++) {
                 $time = date('Y-m-d H:i:s', $baseTime + ($i * 600));
                 $data[] = [
                     'timestamp' => $time,
-                    'client_ip' => ['192.168.1.45', '192.168.1.100', '10.1.1.50'][$i % 3],
-                    'query_name' => ['google.com', 'malicious-domain.com', 'internal-app.corp.local', 'update.microsoft.com'][$i % 4],
-                    'query_type' => ['A', 'AAAA', 'MX', 'TXT'][$i % 4],
-                    'response_code' => ['NOERROR', 'NXDOMAIN', 'REFUSED'][$i % 3],
+                    'client_ip' => ['192.168.1.45', '192.168.1.100', '10.1.1.50', '192.168.1.200'][$i % 4],
+                    'query_name' => ['google.com', 'malicious-domain.com', 'internal-app.corp.local', 'update.microsoft.com', 'dc01.corp.local'][$i % 5],
+                    'query_type' => ['A', 'AAAA', 'MX', 'TXT', 'SRV', 'PTR'][$i % 6],
+                    'response_code' => ['NOERROR', 'NXDOMAIN', 'REFUSED', 'SERVFAIL'][$i % 4],
                     'server' => 'dc-01.corp.local',
-                    'zone' => ['corp.local', '.'][$i % 2]
+                    'zone' => ['corp.local', '.', '1.168.192.in-addr.arpa'][$i % 3],
+                    'record_type' => ['A', 'MX', 'TXT', 'SRV'][$i % 4],
+                    'record_data' => ['192.168.1.10', '10 mail.corp.local', '"v=spf1 include:corp.com ~all"', '0 10 5060 sip.corp.local'][$i % 4],
+                    'ttl' => [300, 3600, 86400, 60][$i % 4]
                 ];
             }
             break;
@@ -649,7 +562,7 @@ function generateDomainControllerLogs($logType) {
 function generateFirewallLogs() {
     $data = [];
     $baseTime = time() - 86400;
-    $headers = ['timestamp', 'action', 'protocol', 'src_ip', 'dest_ip', 'src_port', 'dest_port', 'size', 'tcp_flags', 'rule_id'];
+    $headers = ['timestamp', 'action', 'protocol', 'src_ip', 'dest_ip', 'src_port', 'dest_port', 'size', 'tcp_flags', 'rule_id', 'interface', 'service', 'duration'];
     $data[] = array_combine($headers, $headers);
     
     for ($i = 0; $i < 15; $i++) {
@@ -658,13 +571,16 @@ function generateFirewallLogs() {
             'timestamp' => $time,
             'action' => ['DROP', 'ALLOW', 'REJECT'][$i % 3],
             'protocol' => ['TCP', 'UDP', 'ICMP'][$i % 3],
-            'src_ip' => ['198.51.100.67', '192.168.1.45', '203.0.113.89', '10.1.1.100'][$i % 4],
-            'dest_ip' => ['192.168.1.10', '8.8.8.8', '192.168.1.20', '192.168.1.30'][$i % 4],
-            'src_port' => [54321, 12345, 4444, 5555][$i % 4],
-            'dest_port' => [22, 53, 161, 443, 80][$i % 5],
-            'size' => [60, 512, 120, 1500][$i % 4],
-            'tcp_flags' => ['S', 'PA', 'RA', NULL][$i % 4],
-            'rule_id' => [4001, 1002, 4003, 2001][$i % 4]
+            'src_ip' => ['198.51.100.67', '192.168.1.45', '203.0.113.89', '10.1.1.100', '172.16.1.200'][$i % 5],
+            'dest_ip' => ['192.168.1.10', '8.8.8.8', '192.168.1.20', '192.168.1.30', '10.2.2.100'][$i % 5],
+            'src_port' => [54321, 12345, 4444, 5555, 3389][$i % 5],
+            'dest_port' => [22, 53, 161, 443, 80, 25][$i % 6],
+            'size' => [60, 512, 120, 1500, 84][$i % 5],
+            'tcp_flags' => ['S', 'PA', 'RA', 'FA', NULL][$i % 5],
+            'rule_id' => [4001, 1002, 4003, 2001, 3005][$i % 5],
+            'interface' => ['eth0', 'eth1', 'wan0', 'lan0'][$i % 4],
+            'service' => ['ssh', 'dns', 'snmp', 'https', 'http', 'smtp'][$i % 6],
+            'duration' => [0, 5, 120, 30, 2][$i % 5]
         ];
     }
     
@@ -674,7 +590,7 @@ function generateFirewallLogs() {
 function generateIDSLogs() {
     $data = [];
     $baseTime = time() - 86400;
-    $headers = ['timestamp', 'alert_type', 'protocol', 'src_ip', 'dest_ip', 'src_port', 'dest_port', 'alert_severity', 'alert_message', 'signature_id', 'classification'];
+    $headers = ['timestamp', 'alert_type', 'protocol', 'src_ip', 'dest_ip', 'src_port', 'dest_port', 'alert_severity', 'alert_message', 'signature_id', 'classification', 'priority', 'flow_id', 'category'];
     $data[] = array_combine($headers, $headers);
     
     for ($i = 0; $i < 15; $i++) {
@@ -685,27 +601,33 @@ function generateIDSLogs() {
                 'ET SCAN Potential SSH Scan',
                 'ET POLICY MS Terminal Server traffic',
                 'ET TROJAN Possible Malware Connection',
-                'ET WEB_SERVER Possible SQL Injection'
-            ][$i % 4],
-            'protocol' => 'TCP',
-            'src_ip' => ['198.51.100.23', '203.0.113.50', '192.168.1.150', '198.51.100.89'][$i % 4],
-            'dest_ip' => ['192.168.1.0/24', '203.0.113.50', '192.168.1.10', '192.168.1.20'][$i % 4],
-            'src_port' => [54321, 3389, 4444, 8080][$i % 4],
-            'dest_port' => [22, 54321, 80, 443][$i % 4],
-            'alert_severity' => [2, 3, 1, 2][$i % 4],
+                'ET WEB_SERVER Possible SQL Injection',
+                'ET CINS Active Threat Intelligence Poor Reputation IP'
+            ][$i % 5],
+            'protocol' => ['TCP', 'UDP', 'ICMP'][$i % 3],
+            'src_ip' => ['198.51.100.23', '203.0.113.50', '192.168.1.150', '198.51.100.89', '10.5.6.100'][$i % 5],
+            'dest_ip' => ['192.168.1.10', '203.0.113.50', '192.168.1.20', '192.168.1.30', '192.168.1.40'][$i % 5],
+            'src_port' => [54321, 3389, 4444, 8080, 1337][$i % 5],
+            'dest_port' => [22, 54321, 80, 443, 3389][$i % 5],
+            'alert_severity' => [2, 3, 1, 2, 3][$i % 5],
             'alert_message' => [
                 'GPL ATTACK_RESPONSE id check returned root',
                 'GPL RPC sadmind query with root credentials attempt',
                 'ET TROJAN Metasploit payload detected',
-                'ET WEB_SERVER SQL Injection SELECT UNION'
-            ][$i % 4],
-            'signature_id' => [2100498, 2003340, 2024411, 2013023][$i % 4],
+                'ET WEB_SERVER SQL Injection SELECT UNION',
+                'ET CINS Active Threat Intelligence Poor Reputation IP Group 1'
+            ][$i % 5],
+            'signature_id' => [2100498, 2003340, 2024411, 2013023, 2001289][$i % 5],
             'classification' => [
                 'Attempted Information Leak',
                 'Potential Corporate Privacy Violation',
                 'A Network Trojan was detected',
-                'Web Application Attack'
-            ][$i % 4]
+                'Web Application Attack',
+                'Known Bad IP'
+            ][$i % 5],
+            'priority' => [1, 2, 3, 1, 2][$i % 5],
+            'flow_id' => rand(1000000, 9999999),
+            'category' => ['scan', 'policy', 'trojan', 'web', 'reputation'][$i % 5]
         ];
     }
     
@@ -746,6 +668,4 @@ function initializeCSVFiles() {
 
 // Initialize files
 initializeCSVFiles();
-
 ?>
-
