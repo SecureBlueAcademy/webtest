@@ -148,37 +148,133 @@ function getAllLogFiles() {
     return $logFiles;
 }
 
+// Structured schema definitions for realistic log parsing
+function getLogSchemas() {
+    return [
+        'sysmon' => [
+            '1' => [
+                'event_category' => 'Process Create',
+                'fields' => ['image', 'command_line', 'parent_image', 'parent_command_line', 'process_guid', 'logon_guid', 'user', 'integrity_level', 'hashes']
+            ],
+            '3' => [
+                'event_category' => 'Network Connection',
+                'fields' => ['image', 'user', 'destination_ip', 'destination_port', 'protocol', 'source_ip', 'source_port']
+            ],
+            '10' => [
+                'event_category' => 'Process Access',
+                'fields' => ['source_process', 'target_process', 'call_trace', 'source_process_guid', 'target_process_guid', 'user']
+            ],
+            '11' => [
+                'event_category' => 'File Create',
+                'fields' => ['image', 'target_filename', 'creation_utc_time', 'user', 'hashes']
+            ],
+            '13' => [
+                'event_category' => 'Registry Value Set',
+                'fields' => ['target_object', 'details', 'user', 'image']
+            ],
+            '7' => [
+                'event_category' => 'Image Loaded',
+                'fields' => ['image', 'image_loaded', 'user', 'hashes']
+            ],
+        ],
+        'security' => [
+            '4624' => [
+                'event_category' => 'Logon Success',
+                'fields' => ['logon_type', 'user', 'computer', 'source_address', 'logon_process', 'auth_package', 'target_user', 'target_domain', 'process_name', 'session_id']
+            ],
+            '4625' => [
+                'event_category' => 'Logon Failure',
+                'fields' => ['logon_type', 'user', 'computer', 'source_address', 'logon_process', 'auth_package', 'target_user', 'target_domain', 'process_name']
+            ],
+            '4672' => [
+                'event_category' => 'Special Logon',
+                'fields' => ['user', 'computer', 'target_user', 'target_domain', 'process_name', 'session_id']
+            ],
+            '4648' => [
+                'event_category' => 'Logon with Explicit Credentials',
+                'fields' => ['user', 'computer', 'target_user', 'target_domain', 'source_address', 'process_name', 'auth_package']
+            ],
+            '4732' => [
+                'event_category' => 'Member Added to Group',
+                'fields' => ['target_user', 'target_domain', 'process_name', 'user']
+            ],
+            '4720' => [
+                'event_category' => 'User Created',
+                'fields' => ['target_user', 'target_domain', 'computer', 'user']
+            ],
+            '4738' => [
+                'event_category' => 'Account Changed',
+                'fields' => ['target_user', 'target_domain', 'computer', 'user']
+            ],
+        ]
+    ];
+}
+
+function getSchemaForEvent($logType, $eventId) {
+    $schemas = getLogSchemas();
+    $eventId = (string)$eventId;
+    return $schemas[$logType][$eventId] ?? ['event_category' => ucfirst($logType), 'fields' => []];
+}
+
+function normalizeLogWithSchema($log, $logType) {
+    $eventId = $log['event_id'] ?? '';
+    $schema = getSchemaForEvent($logType, $eventId);
+    $normalized = [
+        'timestamp' => $log['timestamp'] ?? '',
+        'event_id' => $eventId,
+        'event_category' => $schema['event_category'] ?? '',
+    ];
+
+    foreach ($schema['fields'] as $field) {
+        $normalized[$field] = $log[$field] ?? '';
+    }
+
+    // Preserve any additional fields that may exist for custom events
+    foreach ($log as $key => $value) {
+        if (!isset($normalized[$key]) && !in_array($key, ['_source_file', 'raw_log'])) {
+            $normalized[$key] = $value;
+        }
+    }
+
+    $normalized['_schema_fields'] = array_unique(array_merge(['timestamp', 'event_id', 'event_category'], $schema['fields']));
+    return $normalized;
+}
+
 // Read all logs from the new structure
 function readAllLogs() {
     $allLogs = [];
     $logFiles = getAllLogFiles();
-    
+
     foreach ($logFiles as $fileInfo) {
         $logs = readCSV($fileInfo['path']);
         foreach ($logs as $log) {
             // Add source information
+            $log = normalizeLogWithSchema($log, $fileInfo['log_type']);
             $log['asset'] = $fileInfo['asset'];
             $log['log_type'] = $fileInfo['log_type'];
             $log['raw_log'] = generateRawLogString($log);
             $allLogs[] = $log;
         }
     }
-    
+
     // Sort by timestamp
     usort($allLogs, function($a, $b) {
         $timeA = strtotime($a['timestamp'] ?? '');
         $timeB = strtotime($b['timestamp'] ?? '');
         return $timeB - $timeA;
     });
-    
+
     return $allLogs;
 }
 
 // Generate raw log string for display
 function generateRawLogString($log) {
     $raw = '';
+    $schemaFields = $log['_schema_fields'] ?? array_keys($log);
     foreach ($log as $key => $value) {
-        if (!in_array($key, ['asset', 'log_type', 'raw_log', '_source_file']) && !empty($value)) {
+        if (in_array($key, ['asset', 'log_type', 'raw_log', '_source_file', '_schema_fields'])) continue;
+        if (!empty($schemaFields) && !in_array($key, $schemaFields)) continue;
+        if ($value !== '' && $value !== null) {
             $raw .= "$key: $value | ";
         }
     }
