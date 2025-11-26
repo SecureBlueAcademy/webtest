@@ -23,9 +23,16 @@ $custom_end = $_GET['custom_end'] ?? '';
 
 // Handle filters from URL parameters
 foreach ($_GET as $key => $value) {
-    if (!in_array($key, ['time_filter', 'query', 'asset', 'log_type', 'per_page', 'page', 'custom_start', 'custom_end', 'columns', 'exclude']) && $value !== '') {
+    if (!in_array($key, ['time_filter', 'query', 'per_page', 'page', 'custom_start', 'custom_end', 'columns', 'exclude']) && $value !== '') {
         $filters[$key] = $value;
     }
+}
+
+if (!empty($asset_filter)) {
+    $filters['asset'] = $asset_filter;
+}
+if (!empty($log_type_filter)) {
+    $filters['log_type'] = $log_type_filter;
 }
 
 // Handle exclude filters
@@ -296,6 +303,9 @@ foreach ($filtered_logs as $log) {
 }
 $timeline_data = $hourly_counts;
 
+$available_assets = array_values(array_unique(array_column($all_logs, 'asset')));
+$available_log_types = array_values(array_unique(array_column($all_logs, 'log_type')));
+
 // ---------------------------------------------------------
 // COLUMN MANAGEMENT LOGIC
 // ---------------------------------------------------------
@@ -342,14 +352,17 @@ foreach ($all_fields as $field => $values) {
 // Dynamic column definitions (Scanning logs for all possible fields)
 $column_definitions = [
     'timestamp' => ['Time', 'timestamp'],
+    'event_id' => ['Event ID', 'event_id'],
+    'event_category' => ['Category', 'event_category'],
     'raw_log' => ['Raw Log', 'raw_log']
 ];
 
-// Scan a sample of logs to find all available keys
+// Scan logs using their schema definitions to build consistent headers
 $scan_limit = min(50, count($filtered_logs));
-for($i=0; $i < $scan_limit; $i++) {
-    foreach ($filtered_logs[$i] as $key => $value) {
-        if (!in_array($key, ['timestamp', 'raw_log', '_source_file']) && !isset($column_definitions[$key])) {
+for ($i = 0; $i < $scan_limit; $i++) {
+    $schemaFields = $filtered_logs[$i]['_schema_fields'] ?? array_keys($filtered_logs[$i]);
+    foreach ($schemaFields as $key) {
+        if (!in_array($key, ['timestamp', 'raw_log', '_source_file', '_schema_fields']) && !isset($column_definitions[$key])) {
             $column_definitions[$key] = [ucfirst(str_replace('_', ' ', $key)), $key];
         }
     }
@@ -497,6 +510,20 @@ for($i=0; $i < $scan_limit; $i++) {
                         </div>
                         
                         <div style="display: flex; gap: 0.5rem; align-items: center;">
+                            <select name="asset" class="btn" onchange="document.getElementById('filter-form').submit()">
+                                <option value="">All Assets</option>
+                                <?php foreach($available_assets as $asset): ?>
+                                    <option value="<?php echo htmlspecialchars($asset); ?>" <?php echo $asset_filter === $asset ? 'selected' : ''; ?>><?php echo htmlspecialchars($asset); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+
+                            <select name="log_type" class="btn" onchange="document.getElementById('filter-form').submit()">
+                                <option value="">All Log Types</option>
+                                <?php foreach($available_log_types as $type): ?>
+                                    <option value="<?php echo htmlspecialchars($type); ?>" <?php echo $log_type_filter === $type ? 'selected' : ''; ?>><?php echo htmlspecialchars($type); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+
                             <select name="time_filter" class="btn" id="time-filter-select" onchange="toggleCustomDateRange()">
                                 <option value="1h" <?php echo $time_filter === '1h' ? 'selected' : ''; ?>>Last 1 hour</option>
                                 <option value="24h" <?php echo $time_filter === '24h' ? 'selected' : ''; ?>>Last 24 hours</option>
