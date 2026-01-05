@@ -72,7 +72,7 @@
     <text class="subtext" x="32" y="176">Biometric identity traits</text>
   </g>
 
-  <g transform="translate(760 335)">
+  <g transform="translate(760 370)">
     <rect class="tile" x="-30" y="-18" rx="10" ry="10" width="60" height="48" />
     <path d="M-12 -6v-6c0-10 24-10 24 0v6" class="icon-line icon-stroke-orange" />
     <rect x="-14" y="-6" width="28" height="26" rx="6" class="icon-line icon-stroke-orange" />
@@ -80,6 +80,6 @@
     <text class="label" x="0" y="40" text-anchor="middle">MFA</text>
   </g>
 
-  <path class="arrow" d="M300 320 C 420 360, 620 360, 740 340" marker-end="url(#arrowHead)" />
-  <path class="arrow" d="M1300 320 C 1180 360, 980 360, 860 340" marker-end="url(#arrowHead)" />
+  <path class="arrow" d="M300 320 C 420 365, 620 365, 740 370" marker-end="url(#arrowHead)" />
+  <path class="arrow" d="M1300 320 C 1180 365, 980 365, 860 370" marker-end="url(#arrowHead)" />
 </svg>
